@@ -1,0 +1,150 @@
+# Nautilus
+
+Nautilus is a prediction-market fair-value scanner. It compares prediction-market prices from Polymarket and Kalshi with sportsbook odds, removes sportsbook vig, estimates fair probability, calculates edge, and shows opportunities in a clean research dashboard.
+
+Nautilus is market data and analytics software. It is not financial advice, not betting advice, and not a trading or execution platform.
+
+## Architecture
+
+- `backend/`: FastAPI service, SQLAlchemy models, Alembic migrations, collector adapters, fair-value engine, and CLI jobs.
+- `frontend/`: Next.js, TypeScript, Tailwind, and Recharts dashboard.
+- `postgres`: Stores normalized markets, odds snapshots, fair-value snapshots, user model JSON, and alert rules.
+- `docker-compose.yml`: Runs PostgreSQL, the FastAPI API, migrations, and the Next.js app.
+
+## Run Locally
+
+Create an environment file:
+
+```bash
+cp .env.example .env
+```
+
+Start the stack:
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+- Frontend: `http://localhost:3000`
+- Backend health: `http://localhost:8000/health`
+- API docs: `http://localhost:8000/docs`
+
+The backend runs `alembic upgrade head` on container startup.
+
+Frontend-only development:
+
+```bash
+cd frontend
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+```
+
+Backend-only API development:
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+## Environment Variables
+
+Required:
+
+- `DATABASE_URL`: PostgreSQL URL, for example `postgresql+psycopg://nautilus:nautilus@postgres:5432/nautilus`.
+- `FRONTEND_ORIGIN`: CORS origin for the Next.js app.
+
+Optional data-source settings:
+
+- `KALSHI_API_KEY`
+- `KALSHI_API_SECRET`
+- `THE_ODDS_API_KEY`
+- `SPORTS_TO_COLLECT`, a comma-separated list such as `americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl`.
+- `POLYMARKET_API_URL`
+- `KALSHI_API_URL`
+- `THE_ODDS_API_URL`
+
+Collectors are defensive: if a required key is missing, the job logs a clear skip message and exits without crashing the whole app.
+
+## CLI Jobs
+
+Run from inside the backend container:
+
+```bash
+docker compose exec backend python -m app.jobs.collect_prediction_markets
+docker compose exec backend python -m app.jobs.collect_sportsbook_odds
+docker compose exec backend python -m app.jobs.compute_fair_values
+docker compose exec backend python -m app.jobs.send_alerts
+```
+
+For local backend development without Docker, install dependencies in `backend/`, set `DATABASE_URL`, then run the same `python -m ...` commands.
+
+Run backend tests:
+
+```bash
+cd backend
+python -m pytest tests
+```
+
+Exact collector commands:
+
+```bash
+# Polymarket public sports markets, no API key required.
+docker compose exec backend python -m app.jobs.collect_prediction_markets
+
+# The Odds API events plus h2h odds. Requires THE_ODDS_API_KEY.
+docker compose exec backend python -m app.jobs.collect_sportsbook_odds
+
+# Limit sportsbook collection to selected sports.
+docker compose exec -e SPORTS_TO_COLLECT=americanfootball_nfl,basketball_nba backend python -m app.jobs.collect_sportsbook_odds
+
+# Compute fair values after snapshots are collected.
+docker compose exec backend python -m app.jobs.compute_fair_values
+```
+
+## API Surface
+
+- `GET /health`
+- `GET /markets`
+- `GET /markets/{id}`
+- `GET /opportunities`
+- `GET /opportunities/{market_id}`
+- `GET /fair-values/latest`
+- `POST /user-models`
+- `GET /user-models`
+- `POST /alerts`
+- `GET /alerts`
+
+## Fair-Value Methodology
+
+1. Convert sportsbook American or decimal odds into implied probabilities.
+2. For two-sided sportsbook markets, remove vig by normalizing both sides so their probabilities sum to 100%.
+3. Build a consensus fair probability using configurable bookmaker weights.
+4. Calculate prediction-market midpoint from bid/ask when both are available, otherwise from the best available price.
+5. Calculate gross edge as `fair_probability - market_probability`.
+6. Calculate spread and liquidity penalties.
+7. Calculate net edge as `gross_edge - spread_penalty - liquidity_penalty`.
+8. Calculate confidence from sportsbook count, spread quality, liquidity, and sportsbook consensus dispersion.
+
+Each `fair_value_snapshots` row stores an `explanation_json` object with selected bookmakers, original odds, implied probabilities, no-vig probabilities, consensus fair probability, market probability source, gross edge, penalties, net edge, event-match confidence, and final confidence score.
+
+User models are stored as JSON configuration only. Nautilus does not execute user-provided Python code.
+
+## Database Tables
+
+The initial Alembic migration creates:
+
+- `markets`
+- `prediction_market_snapshots`
+- `sportsbook_events`
+- `sportsbook_odds_snapshots`
+- `fair_value_snapshots`
+- `user_models`
+- `alert_rules`
+
+## Notes
+
+The included collectors are clean adapters around external APIs and intentionally normalize into internal DTOs before database writes. Raw provider payloads are stored in JSONB columns on event metadata and snapshot rows, while market/event rows are upserted and snapshots remain append-only. You can extend the adapters with pagination, market filters, and richer sports mappings without changing the API or frontend contracts.
