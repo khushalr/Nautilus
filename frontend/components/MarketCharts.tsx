@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import type { FairValueSnapshot, PredictionMarketSnapshot } from "@/types/api";
+import type { OpportunityHistoryRow } from "@/types/api";
 import { formatPercent } from "@/lib/format";
 
 type ChartDatum = {
@@ -23,13 +23,11 @@ type ChartDatum = {
 };
 
 export function MarketCharts({
-  predictionSnapshots,
-  fairValueHistory
+  history
 }: {
-  predictionSnapshots: PredictionMarketSnapshot[];
-  fairValueHistory: FairValueSnapshot[];
+  history: OpportunityHistoryRow[];
 }) {
-  const data = buildChartData(predictionSnapshots, fairValueHistory);
+  const data = buildChartData(history);
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <ChartPanel title="Market YES vs Sportsbook Fair">
@@ -110,33 +108,13 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   );
 }
 
-function buildChartData(
-  predictionSnapshots: PredictionMarketSnapshot[],
-  fairValueHistory: FairValueSnapshot[]
-): ChartDatum[] {
-  if (fairValueHistory.length > 0) {
-    return [...fairValueHistory]
-      .sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at))
-      .map((snapshot) => ({
-        time: new Date(snapshot.observed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        market: snapshot.market_probability,
-        fair: snapshot.fair_probability,
-        edge: snapshot.net_edge
-      }));
-  }
-
-  const fairByTime = new Map(fairValueHistory.map((item) => [item.observed_at, item]));
-  return [...predictionSnapshots]
-    .sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at))
-    .map((snapshot) => {
-      const fair = fairByTime.get(snapshot.observed_at);
-      const fallbackFair = fairValueHistory[fairValueHistory.length - 1];
-      const fairProbability = fair?.fair_probability ?? fallbackFair?.fair_probability ?? snapshot.midpoint_probability;
-      return {
-        time: new Date(snapshot.observed_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        market: snapshot.midpoint_probability,
-        fair: fairProbability,
-        edge: fair?.net_edge ?? fairProbability - snapshot.midpoint_probability
-      };
-    });
+function buildChartData(history: OpportunityHistoryRow[]): ChartDatum[] {
+  return [...history]
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+    .map((snapshot) => ({
+      time: new Date(snapshot.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      market: snapshot.market_probability,
+      fair: snapshot.fair_probability,
+      edge: snapshot.net_edge
+    }));
 }

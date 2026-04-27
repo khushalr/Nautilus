@@ -22,6 +22,7 @@ from app.schemas import (
     FairValueSnapshotOut,
     MarketDetailOut,
     MarketOut,
+    OpportunityHistoryRow,
     OpportunityScannerOut,
     UserModelCreate,
     UserModelOut,
@@ -180,6 +181,61 @@ def get_opportunity(market_id: str, db: Session = Depends(get_db)) -> MarketDeta
     return get_market(market_id, db)
 
 
+@router.get("/opportunities/{market_id}/history", response_model=list[OpportunityHistoryRow])
+def get_opportunity_history(
+    market_id: str,
+    db: Session = Depends(get_db),
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> list[OpportunityHistoryRow]:
+    market = db.get(Market, market_id)
+    if market is None:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    rows = list(
+        db.scalars(
+            select(FairValueSnapshot)
+            .where(FairValueSnapshot.market_id == market_id)
+            .order_by(FairValueSnapshot.observed_at.asc())
+            .limit(limit)
+        )
+    )
+    return [_history_row(market, row) for row in rows]
+
+
+def _history_row(market: Market, fair_value: FairValueSnapshot) -> OpportunityHistoryRow:
+    market_probability = fair_value.market_probability
+    fair_probability = fair_value.fair_probability
+    gross_edge = fair_value.gross_edge
+    net_edge = fair_value.net_edge
+
+    explanation = fair_value.explanation_json if isinstance(fair_value.explanation_json, dict) else {}
+    market_probability_explanation = explanation.get("market_probability")
+    orientation = (
+        market_probability_explanation.get("orientation")
+        if isinstance(market_probability_explanation, dict)
+        else None
+    )
+    if (
+        market.market_type in {"futures", "awards", "outrights"}
+        and market.selection.lower().strip() == "no"
+        and orientation != "positive_yes_complemented_from_no"
+    ):
+        penalty_total = fair_value.gross_edge - fair_value.net_edge
+        market_probability = _complement_probability(fair_value.market_probability)
+        fair_probability = _complement_probability(fair_value.fair_probability)
+        gross_edge = fair_probability - market_probability
+        net_edge = gross_edge - penalty_total
+
+    return OpportunityHistoryRow(
+        timestamp=fair_value.observed_at,
+        market_probability=market_probability,
+        fair_probability=fair_probability,
+        gross_edge=gross_edge,
+        net_edge=net_edge,
+        confidence_score=fair_value.confidence_score,
+    )
+
+
 def _opportunity_scanner_row(
     market: Market,
     fair_value: FairValueSnapshot,
@@ -253,6 +309,10 @@ def _string_or_none(value: object) -> str | None:
 
 def _float_or_none(value: object) -> float | None:
     return value if isinstance(value, float | int) else None
+
+
+def _complement_probability(value: float) -> float:
+    return max(0.0, min(1.0, 1 - value))
 
 
 @router.get("/fair-values/latest", response_model=list[FairValueSnapshotOut])

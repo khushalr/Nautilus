@@ -111,6 +111,15 @@ class OpportunityScannerOut(BaseModel):
     market_extra: dict[str, Any] | None = None
 
 
+class OpportunityHistoryRow(BaseModel):
+    timestamp: datetime
+    market_probability: float
+    fair_probability: float
+    gross_edge: float
+    net_edge: float
+    confidence_score: float
+
+
 class UserModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     config: dict[str, Any] = Field(default_factory=dict)

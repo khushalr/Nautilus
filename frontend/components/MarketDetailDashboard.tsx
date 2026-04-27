@@ -6,12 +6,13 @@ import { AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
 import { AssumptionsPanel } from "@/components/AssumptionsPanel";
 import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { MarketCharts } from "@/components/MarketCharts";
-import { apiUrl, sampleMarketDetail } from "@/lib/api";
+import { apiUrl, sampleMarketDetail, sampleOpportunityHistory } from "@/lib/api";
 import { formatDateTime, formatPercent, formatSignedPercent, sourceLabel } from "@/lib/format";
-import type { MarketDetail } from "@/types/api";
+import type { MarketDetail, OpportunityHistoryRow } from "@/types/api";
 
 export function MarketDetailDashboard({ marketId }: { marketId: string }) {
   const [detail, setDetail] = useState<MarketDetail | null>(null);
+  const [history, setHistory] = useState<OpportunityHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +21,7 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
   async function loadMarket({ sample = false }: { sample?: boolean } = {}) {
     if (sample) {
       setDetail(sampleMarketDetail(marketId));
+      setHistory(sampleOpportunityHistory(marketId));
       setUsingSample(true);
       setError(null);
       setLoading(false);
@@ -30,11 +32,18 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
     setError(null);
     setRefreshing(true);
     try {
-      const response = await fetch(apiUrl(`/markets/${marketId}`), { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
+      const [detailResponse, historyResponse] = await Promise.all([
+        fetch(apiUrl(`/markets/${marketId}`), { cache: "no-store" }),
+        fetch(apiUrl(`/opportunities/${marketId}/history`), { cache: "no-store" })
+      ]);
+      if (!detailResponse.ok) {
+        throw new Error(`API returned ${detailResponse.status}`);
       }
-      setDetail((await response.json()) as MarketDetail);
+      if (!historyResponse.ok) {
+        throw new Error(`History API returned ${historyResponse.status}`);
+      }
+      setDetail((await detailResponse.json()) as MarketDetail);
+      setHistory((await historyResponse.json()) as OpportunityHistoryRow[]);
       setUsingSample(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load market.");
@@ -108,7 +117,9 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
 
       <ExplanationPanel fairValue={latest} market={detail.market} />
 
-      <MarketCharts predictionSnapshots={detail.prediction_snapshots} fairValueHistory={detail.fair_value_history} />
+      <HistorySummary history={history} />
+
+      <MarketCharts history={history} />
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <SportsbookOddsTable detail={detail} />
@@ -158,6 +169,23 @@ function SportsbookOddsTable({ detail }: { detail: MarketDetail }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function HistorySummary({ history }: { history: OpportunityHistoryRow[] }) {
+  const summary = summarizeHistory(history);
+  return (
+    <section className="border border-line bg-ink/70 p-4">
+      <div className="mb-3 text-xs uppercase tracking-[0.16em] text-steel">Historical Signal Summary</div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <Metric label="First edge" value={formatSignedPercent(summary.firstEdge)} />
+        <Metric label="Current edge" value={formatSignedPercent(summary.currentEdge)} tone="mint" />
+        <Metric label="Max edge" value={formatSignedPercent(summary.maxEdge)} />
+        <Metric label="Edge change" value={formatSignedPercent(summary.edgeChange)} />
+        <Metric label="Market change" value={formatSignedPercent(summary.marketProbabilityChange)} />
+        <Metric label="Fair change" value={formatSignedPercent(summary.fairProbabilityChange)} />
+      </div>
+    </section>
   );
 }
 
@@ -249,4 +277,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function textFrom(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function summarizeHistory(history: OpportunityHistoryRow[]) {
+  if (history.length === 0) {
+    return {
+      firstEdge: null,
+      currentEdge: null,
+      maxEdge: null,
+      edgeChange: null,
+      marketProbabilityChange: null,
+      fairProbabilityChange: null
+    };
+  }
+  const sorted = [...history].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  const first = sorted[0];
+  const current = sorted[sorted.length - 1];
+  const maxEdge = Math.max(...sorted.map((row) => row.net_edge));
+  return {
+    firstEdge: first.net_edge,
+    currentEdge: current.net_edge,
+    maxEdge,
+    edgeChange: current.net_edge - first.net_edge,
+    marketProbabilityChange: current.market_probability - first.market_probability,
+    fairProbabilityChange: current.fair_probability - first.fair_probability
+  };
 }

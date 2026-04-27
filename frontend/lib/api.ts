@@ -1,4 +1,4 @@
-import type { AlertRule, MarketDetail, Opportunity, UserModel } from "@/types/api";
+import type { AlertRule, MarketDetail, Opportunity, OpportunityHistoryRow, UserModel } from "@/types/api";
 
 const serverApiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export const clientApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -220,6 +220,25 @@ export function sampleMarketDetail(id: string): MarketDetail {
       }
     ]
   };
+}
+
+export function sampleOpportunityHistory(id: string): OpportunityHistoryRow[] {
+  const opportunity = sampleOpportunities.find((item) => item.market_id === id) ?? sampleOpportunities[0];
+  const baseTime = Date.parse("2026-04-26T14:00:00Z");
+  return Array.from({ length: 18 }, (_, index) => {
+    const marketProbability = opportunity.market_probability + Math.sin(index / 2) * 0.01 - 0.012 + index * 0.001;
+    const fairProbability = opportunity.fair_probability + Math.cos(index / 3) * 0.006;
+    const grossEdge = fairProbability - marketProbability;
+    const spreadPenalty = opportunity.spread ? opportunity.spread * 0.5 : 0;
+    return {
+      timestamp: new Date(baseTime + index * 20 * 60 * 1000).toISOString(),
+      market_probability: marketProbability,
+      fair_probability: fairProbability,
+      gross_edge: grossEdge,
+      net_edge: grossEdge - spreadPenalty,
+      confidence_score: opportunity.confidence_score
+    };
+  });
 }
 
 export const sampleUserModels: UserModel[] = [

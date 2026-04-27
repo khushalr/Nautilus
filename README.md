@@ -119,6 +119,7 @@ docker compose exec backend python -m app.jobs.compute_fair_values
 - `GET /opportunities?include_debug=true`: adds assumptions and explanation JSON for debugging.
 - `GET /opportunities?include_raw=true`: adds raw market metadata for debugging.
 - `GET /opportunities/{market_id}`: detail response with explanation data for the selected market.
+- `GET /opportunities/{market_id}/history`: lightweight time series for market YES probability, sportsbook fair probability, gross edge, net edge, and confidence.
 - `GET /fair-values/latest`
 - `POST /user-models`
 - `GET /user-models`
@@ -157,6 +158,8 @@ Limitations:
 - Futures/awards matching is conservative: team futures require strong team-name matches, player awards require strong player-name matches, and weak or ambiguous matches are skipped.
 
 Each `fair_value_snapshots` row stores an `explanation_json` object with selected bookmakers, original odds, implied probabilities, no-vig probabilities, consensus fair probability, market probability source, gross edge, penalties, net edge, event-match confidence, and final confidence score.
+
+Fair-value snapshots are append-only, so repeated `compute_fair_values` runs create a history of signal quality over time. The history endpoint intentionally omits raw provider blobs, assumptions, and explanation JSON.
 
 User models are stored as JSON configuration only. Nautilus does not execute user-provided Python code.
 

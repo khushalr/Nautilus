@@ -84,6 +84,15 @@ export type Opportunity = {
   market_extra?: Record<string, unknown>;
 };
 
+export type OpportunityHistoryRow = {
+  timestamp: string;
+  market_probability: number;
+  fair_probability: number;
+  gross_edge: number;
+  net_edge: number;
+  confidence_score: number;
+};
+
 export type MarketDetail = {
   market: Market;
   latest_fair_value: FairValueSnapshot | null;
