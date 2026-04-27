@@ -1,8 +1,8 @@
 import { AlertsManager } from "@/components/AlertsManager";
-import { getAlerts, getUserModels } from "@/lib/api";
+import { getAlerts } from "@/lib/api";
 
 export default async function AlertsPage() {
-  const [alerts, models] = await Promise.all([getAlerts(), getUserModels()]);
+  const alerts = await getAlerts();
   return (
     <div className="space-y-6">
       <section className="border border-line bg-ink/70 p-5">
@@ -12,7 +12,7 @@ export default async function AlertsPage() {
           starter job logs matches and leaves webhook or email delivery as a production extension.
         </p>
       </section>
-      <AlertsManager alerts={alerts} models={models} />
+      <AlertsManager alerts={alerts} />
     </div>
   );
 }

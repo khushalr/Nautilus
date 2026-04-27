@@ -11,6 +11,7 @@ from app.core.config import Settings, get_settings
 from app.services.collectors.base import CollectionResult, CollectorAdapter, PersistResult, PredictionMarketQuote
 from app.services.collectors.persistence import persist_prediction_market_quotes
 from app.services.fair_value import calculate_market_midpoint
+from app.services.market_classification import classify_prediction_market, market_priority
 from app.services.normalization import normalized_event_key_from_name, slugify
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class PolymarketCollector(CollectorAdapter):
             if not _is_sports_market(item):
                 continue
             quotes.extend(_quotes_from_market(item, self.source_name))
+        quotes.sort(key=lambda quote: market_priority(quote.market_type, quote.start_time))
 
         logger.info("Collected %s Polymarket markets", len(quotes))
         return CollectionResult(ok=True, message=f"Collected {len(quotes)} Polymarket markets", prediction_markets=quotes)
@@ -80,6 +82,12 @@ def _quotes_from_market(item: dict[str, Any], source_name: str) -> list[Predicti
     )
     league = _category(item)
     start_time = _parse_datetime(item.get("startDate") or item.get("start_date") or item.get("gameStartTime"))
+    classified_market_type = classify_prediction_market(
+        title=event_name,
+        league=league,
+        start_time=start_time,
+        raw_payload=item,
+    )
     outcomes = _list_from_jsonish(item.get("outcomes")) or [item.get("outcome") or item.get("selection") or "Yes"]
     outcome_prices = _list_from_jsonish(
         item.get("outcomePrices")
@@ -114,7 +122,7 @@ def _quotes_from_market(item: dict[str, Any], source_name: str) -> list[Predicti
                 external_id=f"{base_external_id}:{slugify(selection)}",
                 event_name=event_name,
                 league=league,
-                market_type=str(item.get("market_type") or item.get("marketType") or "binary"),
+                market_type=classified_market_type,
                 selection=selection,
                 normalized_event_key=normalized_event_key_from_name(league, event_name, start_time),
                 start_time=start_time,
@@ -163,17 +171,24 @@ def _is_sports_market(item: dict[str, Any]) -> bool:
 
 def _category(item: dict[str, Any]) -> str | None:
     category = item.get("category")
-    if isinstance(category, str) and category:
+    if isinstance(category, str) and category and category.lower() not in {"sport", "sports"}:
         return category
     tags = item.get("tags")
     if isinstance(tags, list):
+        league_labels: list[str] = []
         for tag in tags:
             if isinstance(tag, dict) and tag.get("label"):
                 label = str(tag["label"])
-                if label.lower() != "sports":
+                if label.lower() in {"nba", "nfl", "mlb", "nhl"}:
                     return label
-            if isinstance(tag, str) and tag.lower() != "sports":
+                if label.lower() not in {"sport", "sports"}:
+                    league_labels.append(label)
+            if isinstance(tag, str) and tag.lower() in {"nba", "nfl", "mlb", "nhl"}:
                 return tag
+            if isinstance(tag, str) and tag.lower() not in {"sport", "sports"}:
+                league_labels.append(tag)
+        if league_labels:
+            return league_labels[0]
     return "sports"
 
 

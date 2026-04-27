@@ -14,3 +14,9 @@ npm-debug.log*
 
 # Local data
 postgres_data/
+
+# Local/system files
+.DS_Store
+.env
+.env.*
+*.save

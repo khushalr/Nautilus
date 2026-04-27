@@ -12,9 +12,15 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base
 from app.models import Market, PredictionMarketSnapshot, SportsbookEvent, SportsbookOddsSnapshot
 from app.services.collectors.base import CollectionResult, PredictionMarketQuote, SportsbookEventRecord, SportsbookLine
-from app.services.collectors.odds_api import OddsApiCollector
+from app.services.collectors.odds_api import (
+    OddsApiCollector,
+    _expand_with_related_outright_sports,
+    _markets_for_sport,
+    _odds_values_from_price,
+)
 from app.services.collectors.polymarket import PolymarketCollector, _quotes_from_market
 from app.services.fair_value import american_to_probability, decimal_to_probability
+from app.services.market_classification import classify_prediction_market, effective_prediction_market_type
 
 
 @pytest.fixture()
@@ -34,6 +40,48 @@ def test_odds_conversion() -> None:
     assert american_to_probability(-150) == pytest.approx(0.6)
     assert american_to_probability(200) == pytest.approx(1 / 3)
     assert decimal_to_probability(2.5) == pytest.approx(0.4)
+
+
+def test_odds_api_outrights_market_support_uses_sport_metadata() -> None:
+    assert _markets_for_sport(["h2h", "outrights"], {"key": "basketball_nba", "has_outrights": True}) == [
+        "h2h",
+        "outrights",
+    ]
+    assert _markets_for_sport(["h2h", "outrights"], {"key": "baseball_mlb", "has_outrights": False}) == [
+        "h2h"
+    ]
+    assert _markets_for_sport(
+        ["h2h", "outrights"],
+        {"key": "basketball_nba_championship_winner", "has_outrights": True},
+        outrights_only=True,
+    ) == ["outrights"]
+
+
+def test_odds_api_expands_configured_sports_with_related_outrights() -> None:
+    assert _expand_with_related_outright_sports(
+        ["basketball_nba"],
+        {
+            "basketball_nba": {"key": "basketball_nba", "active": True, "has_outrights": False},
+            "basketball_nba_championship_winner": {
+                "key": "basketball_nba_championship_winner",
+                "active": True,
+                "has_outrights": True,
+            },
+            "icehockey_nhl_championship_winner": {
+                "key": "icehockey_nhl_championship_winner",
+                "active": True,
+                "has_outrights": True,
+            },
+        },
+    ) == ["basketball_nba", "basketball_nba_championship_winner"]
+
+
+def test_decimal_outright_price_is_supported() -> None:
+    american, decimal, implied = _odds_values_from_price(11.0)
+
+    assert american is None
+    assert decimal == pytest.approx(11.0)
+    assert implied == pytest.approx(1 / 11)
 
 
 def test_polymarket_duplicate_market_upsert_inserts_new_snapshots(db_session) -> None:
@@ -135,6 +183,49 @@ def test_polymarket_outcome_price_becomes_last_price_without_bid_ask() -> None:
     assert quotes[0].ask_probability is None
     assert quotes[0].last_price == pytest.approx(0.42)
     assert quotes[0].midpoint_probability == pytest.approx(0.42)
+
+
+def test_polymarket_classifies_h2h_and_futures() -> None:
+    start_time = datetime(2026, 5, 1, tzinfo=UTC)
+    h2h_quotes = _quotes_from_market(
+        {
+            "id": "pm-h2h",
+            "question": "Los Angeles Lakers vs Boston Celtics",
+            "category": "NBA",
+            "startDate": start_time.isoformat(),
+            "outcomes": '["Los Angeles Lakers", "Boston Celtics"]',
+            "outcomePrices": '["0.48", "0.52"]',
+        },
+        "polymarket",
+    )
+    futures_quotes = _quotes_from_market(
+        {
+            "id": "pm-futures",
+            "question": "Will the Boston Celtics win the 2026 NBA Finals?",
+            "category": "NBA",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": '["0.25", "0.75"]',
+        },
+        "polymarket",
+    )
+
+    assert {quote.market_type for quote in h2h_quotes} == {"h2h"}
+    assert {quote.market_type for quote in futures_quotes} == {"futures"}
+
+
+def test_market_classification_identifies_awards_and_legacy_binary() -> None:
+    assert classify_prediction_market(title="Will Nikola Jokic win the 2025-2026 NBA MVP?") == "awards"
+
+    legacy_market = SimpleNamespace(
+        event_name="Will the New York Knicks beat the Boston Celtics?",
+        selection="Yes",
+        league="NBA",
+        start_time=datetime(2026, 5, 1, tzinfo=UTC),
+        market_type="binary",
+        extra={},
+    )
+
+    assert effective_prediction_market_type(legacy_market) == "h2h"
 
 
 def test_odds_api_missing_key_fails_gracefully() -> None:

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
         default="americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl",
         alias="SPORTS_TO_COLLECT",
     )
+    sportsbook_markets_to_collect_raw: str = Field(
+        default="h2h,outrights",
+        alias="SPORTSBOOK_MARKETS_TO_COLLECT",
+    )
 
     default_user_model: dict[str, object] = {
         "min_edge": 0.03,
@@ -74,6 +78,14 @@ class Settings(BaseSettings):
             if isinstance(parsed, list):
                 return [str(sport).strip() for sport in parsed if str(sport).strip()]
         return [sport.strip() for sport in self.sports_to_collect_raw.split(",") if sport.strip()]
+
+    @property
+    def sportsbook_markets_to_collect(self) -> list[str]:
+        return [
+            market.strip()
+            for market in self.sportsbook_markets_to_collect_raw.split(",")
+            if market.strip()
+        ]
 
 
 @lru_cache

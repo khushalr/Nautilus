@@ -63,6 +63,7 @@ Optional data-source settings:
 - `KALSHI_API_SECRET`
 - `THE_ODDS_API_KEY`
 - `SPORTS_TO_COLLECT`, a comma-separated list such as `americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl`.
+- `SPORTSBOOK_MARKETS_TO_COLLECT`, a comma-separated list of sportsbook market keys. Defaults to `h2h,outrights`. When `outrights` is enabled, Nautilus expands configured base sports with related active outright sport keys advertised by The Odds API, such as championship-winner markets, when available.
 - `POLYMARKET_API_URL`
 - `KALSHI_API_URL`
 - `THE_ODDS_API_URL`
@@ -95,11 +96,15 @@ Exact collector commands:
 # Polymarket public sports markets, no API key required.
 docker compose exec backend python -m app.jobs.collect_prediction_markets
 
-# The Odds API events plus h2h odds. Requires THE_ODDS_API_KEY.
+# The Odds API events plus h2h/outrights odds where supported. Requires THE_ODDS_API_KEY.
 docker compose exec backend python -m app.jobs.collect_sportsbook_odds
 
 # Limit sportsbook collection to selected sports.
 docker compose exec -e SPORTS_TO_COLLECT=americanfootball_nfl,basketball_nba backend python -m app.jobs.collect_sportsbook_odds
+
+# Limit sportsbook market collection to h2h only or request outrights explicitly.
+docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=h2h backend python -m app.jobs.collect_sportsbook_odds
+docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=h2h,outrights backend python -m app.jobs.collect_sportsbook_odds
 
 # Compute fair values after snapshots are collected.
 docker compose exec backend python -m app.jobs.compute_fair_values
@@ -122,12 +127,24 @@ docker compose exec backend python -m app.jobs.compute_fair_values
 
 1. Convert sportsbook American or decimal odds into implied probabilities.
 2. For two-sided sportsbook markets, remove vig by normalizing both sides so their probabilities sum to 100%.
-3. Build a consensus fair probability using configurable bookmaker weights.
+3. For futures and awards, use sportsbook `outrights` odds when available and remove vig by normalizing all outcomes in the outright market for each bookmaker.
 4. Calculate prediction-market midpoint from bid/ask when both are available, otherwise from the best available price.
 5. Calculate gross edge as `fair_probability - market_probability`.
 6. Calculate spread and liquidity penalties.
 7. Calculate net edge as `gross_edge - spread_penalty - liquidity_penalty`.
 8. Calculate confidence from sportsbook count, spread quality, liquidity, and sportsbook consensus dispersion.
+
+Supported fair-value routes:
+
+- `h2h`: prediction-market H2H/game markets compared against sportsbook H2H moneyline odds.
+- `futures`: team/championship/conference/division-style prediction markets compared against sportsbook `outrights` odds when The Odds API returns matching outcomes.
+- `awards`: player award markets compared against sportsbook `outrights` odds when The Odds API returns matching award outcomes.
+
+Limitations:
+
+- Nautilus does not fake futures or award odds. If The Odds API does not return `outrights` for the configured sport, related outright sport key, region, or account plan, futures/awards markets are skipped with a clear log message.
+- The Odds API exposes `outrights` only for selected sports/competitions. Availability can differ from H2H game odds and may not be present on every plan or region.
+- Futures/awards matching is conservative: team futures require strong team-name matches, player awards require strong player-name matches, and weak or ambiguous matches are skipped.
 
 Each `fair_value_snapshots` row stores an `explanation_json` object with selected bookmakers, original odds, implied probabilities, no-vig probabilities, consensus fair probability, market probability source, gross edge, penalties, net edge, event-match confidence, and final confidence score.
 
