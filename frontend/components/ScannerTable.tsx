@@ -18,8 +18,8 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
               <th className="px-4 py-3 font-medium">League</th>
               <th className="px-4 py-3 font-medium">Start time</th>
               <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 text-right font-medium">Market probability</th>
-              <th className="px-4 py-3 text-right font-medium">Fair probability</th>
+              <th className="px-4 py-3 text-right font-medium">Market YES</th>
+              <th className="px-4 py-3 text-right font-medium">Sportsbook Fair</th>
               <th className="px-4 py-3 text-right font-medium">Gross edge</th>
               <th className="px-4 py-3 text-right font-medium">Net edge</th>
               <th className="px-4 py-3 text-right font-medium">Spread</th>
@@ -36,13 +36,15 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
                 </td>
               </tr>
             ) : (
-              opportunities.map(({ market, fair_value }) => (
+              opportunities.map(({ market, fair_value }) => {
+                const displayOutcome = outcomeLabel(market, fair_value);
+                return (
                 <tr key={`${market.id}-${fair_value.id}`} className="border-b border-line/70 transition hover:bg-panel/70">
                   <td className="px-4 py-4">
                     <Link href={`/markets/${market.id}`} className="group flex items-start justify-between gap-3">
                       <div>
                         <div className="font-medium text-white">{market.event_name}</div>
-                        <div className="mt-1 text-xs text-steel">{market.selection}</div>
+                        <div className="mt-1 text-xs text-steel">Outcome: {displayOutcome}</div>
                       </div>
                       <ArrowUpRight className="mt-1 h-4 w-4 shrink-0 text-steel transition group-hover:text-mint" />
                     </Link>
@@ -63,7 +65,8 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
                   </td>
                   <td className="px-4 py-4 text-right text-steel">{formatDateTime(fair_value.observed_at)}</td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
@@ -77,4 +80,26 @@ function formatLiquidity(value: number | null): string {
     return "n/a";
   }
   return `$${Math.round(value).toLocaleString()}`;
+}
+
+function outcomeLabel(market: Opportunity["market"], fairValue: Opportunity["fair_value"]): string {
+  const explanation = fairValue.explanation_json;
+  const explanationMarket = isRecord(explanation.market) ? explanation.market : {};
+  const marketProbability = isRecord(explanation.market_probability) ? explanation.market_probability : {};
+  const outcome = textFrom(explanationMarket.display_outcome) ?? textFrom(marketProbability.display_outcome);
+  if (!outcome) {
+    return market.selection;
+  }
+  if (["futures", "awards", "outrights"].includes(market.market_type)) {
+    return `${outcome} win`;
+  }
+  return outcome;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function textFrom(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }

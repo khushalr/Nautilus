@@ -16,6 +16,7 @@ from app.jobs.compute_fair_values import (
     _market_outright_context,
     _outcome_match_score,
     _outright_event_score,
+    _prediction_probability_inputs,
     _sportsbook_outright_context,
 )
 from app.services.normalization import match_prediction_market_to_sportsbook_events, normalized_event_key
@@ -92,6 +93,63 @@ def test_missing_bid_ask_uses_last_price() -> None:
     assert result.market_probability_source == "last_price"
     assert result.spread is None
     assert result.gross_edge == pytest.approx(0.05)
+
+
+def test_yes_futures_market_keeps_positive_probability() -> None:
+    market = SimpleNamespace(
+        event_name="Will the Philadelphia Flyers win the 2026 NHL Stanley Cup?",
+        selection="Yes",
+    )
+    snapshot = SimpleNamespace(bid_probability=0.035, ask_probability=0.045, last_price=0.04)
+
+    inputs = _prediction_probability_inputs(snapshot, market, "futures")
+
+    assert inputs.display_outcome == "Philadelphia Flyers"
+    assert inputs.orientation == "raw_selection"
+    assert inputs.bid_probability == pytest.approx(0.035)
+    assert inputs.ask_probability == pytest.approx(0.045)
+    assert inputs.last_price == pytest.approx(0.04)
+
+
+def test_no_futures_market_complements_to_positive_yes_probability() -> None:
+    market = SimpleNamespace(
+        event_name="Will the Philadelphia Flyers win the 2026 NHL Stanley Cup?",
+        selection="No",
+    )
+    snapshot = SimpleNamespace(bid_probability=0.955, ask_probability=0.965, last_price=0.964)
+
+    inputs = _prediction_probability_inputs(snapshot, market, "futures")
+
+    assert inputs.display_outcome == "Philadelphia Flyers"
+    assert inputs.orientation == "positive_yes_complemented_from_no"
+    assert inputs.bid_probability == pytest.approx(0.035)
+    assert inputs.ask_probability == pytest.approx(0.045)
+    assert inputs.last_price == pytest.approx(0.036)
+    assert inputs.raw_last_price == pytest.approx(0.964)
+
+
+def test_futures_edge_uses_positive_market_probability_after_normalization() -> None:
+    market = SimpleNamespace(
+        event_name="Will the Philadelphia Flyers win the 2026 NHL Stanley Cup?",
+        selection="No",
+    )
+    snapshot = SimpleNamespace(bid_probability=None, ask_probability=None, last_price=0.964)
+    inputs = _prediction_probability_inputs(snapshot, market, "futures")
+
+    result = calculate_edge(
+        EdgeInputs(
+            fair_probability=0.05,
+            bid_probability=inputs.bid_probability,
+            ask_probability=inputs.ask_probability,
+            last_price=inputs.last_price,
+            liquidity=1000,
+            sportsbook_count=4,
+            consensus_dispersion=0.01,
+        )
+    )
+
+    assert result.market_probability == pytest.approx(0.036)
+    assert result.gross_edge == pytest.approx(0.014)
 
 
 def test_prediction_market_matches_sportsbook_event_with_confidence() -> None:

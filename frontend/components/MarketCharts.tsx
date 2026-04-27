@@ -32,7 +32,7 @@ export function MarketCharts({
   const data = buildChartData(predictionSnapshots, fairValueHistory);
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      <ChartPanel title="Price Chart">
+      <ChartPanel title="Market YES vs Sportsbook Fair">
         <ChartFrame data={data}>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data}>
@@ -46,7 +46,7 @@ export function MarketCharts({
           </ResponsiveContainer>
         </ChartFrame>
       </ChartPanel>
-      <ChartPanel title="Fair Value">
+      <ChartPanel title="Sportsbook Fair">
         <ChartFrame data={data}>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data}>

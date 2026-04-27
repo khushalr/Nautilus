@@ -52,6 +52,18 @@ class OutrightMatchDebug:
     reason: str
 
 
+@dataclass(frozen=True)
+class PredictionProbabilityInputs:
+    bid_probability: float | None
+    ask_probability: float | None
+    last_price: float | None
+    raw_bid_probability: float | None
+    raw_ask_probability: float | None
+    raw_last_price: float | None
+    orientation: str
+    display_outcome: str | None
+
+
 def possible_outright_matches(
     market: Market,
     snapshots: list[SportsbookOddsSnapshot],
@@ -227,12 +239,13 @@ def main() -> None:
             weights = [book["weight"] for book in bookmaker_probabilities]
             fair_probability = weighted_consensus_fair_probability(probabilities, weights)
             dispersion = consensus_dispersion(probabilities)
+            prediction_inputs = _prediction_probability_inputs(snapshot, market, effective_market_type)
             edge = calculate_edge(
                 EdgeInputs(
                     fair_probability=fair_probability,
-                    bid_probability=snapshot.bid_probability,
-                    ask_probability=snapshot.ask_probability,
-                    last_price=snapshot.last_price,
+                    bid_probability=prediction_inputs.bid_probability,
+                    ask_probability=prediction_inputs.ask_probability,
+                    last_price=prediction_inputs.last_price,
                     liquidity=snapshot.liquidity,
                     sportsbook_count=len(bookmaker_probabilities),
                     consensus_dispersion=dispersion,
@@ -248,6 +261,7 @@ def main() -> None:
                 bookmaker_probabilities=bookmaker_probabilities,
                 fair_probability=fair_probability,
                 consensus_dispersion_value=dispersion,
+                prediction_inputs=prediction_inputs,
                 edge=edge,
             )
             db.add(
@@ -493,6 +507,44 @@ def _bookmaker_no_vig_probabilities(
     return probabilities
 
 
+def _prediction_probability_inputs(
+    snapshot: PredictionMarketSnapshot,
+    market: Market,
+    market_type: str,
+) -> PredictionProbabilityInputs:
+    display_outcome = _target_outcome_from_market(market)
+    raw_selection = market.selection.lower().strip()
+    should_complement = market_type in {"futures", "awards"} and raw_selection == "no"
+
+    if should_complement:
+        bid = _complement_probability(snapshot.ask_probability)
+        ask = _complement_probability(snapshot.bid_probability)
+        last = _complement_probability(snapshot.last_price)
+        orientation = "positive_yes_complemented_from_no"
+    else:
+        bid = snapshot.bid_probability
+        ask = snapshot.ask_probability
+        last = snapshot.last_price
+        orientation = "raw_selection"
+
+    return PredictionProbabilityInputs(
+        bid_probability=bid,
+        ask_probability=ask,
+        last_price=last,
+        raw_bid_probability=snapshot.bid_probability,
+        raw_ask_probability=snapshot.ask_probability,
+        raw_last_price=snapshot.last_price,
+        orientation=orientation,
+        display_outcome=display_outcome,
+    )
+
+
+def _complement_probability(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return max(0.0, min(1.0, 1 - value))
+
+
 def _outright_bookmaker_probabilities(
     *,
     db,
@@ -561,11 +613,6 @@ def _outright_bookmaker_probabilities(
             continue
         selected_line = latest_by_selection[selection_key]
         selected_no_vig_probability = selected_line.implied_probability / total_probability
-        no_vig_probability = (
-            1 - selected_no_vig_probability
-            if market.selection.lower().strip() == "no"
-            else selected_no_vig_probability
-        )
         weight = float(weights.get(bookmaker, 1.0)) if isinstance(weights, dict) else 1.0
         probabilities_by_event[event_id].append(
             {
@@ -579,9 +626,10 @@ def _outright_bookmaker_probabilities(
                 },
                 "implied_probability": selected_line.implied_probability,
                 "outright_market_total_implied_probability": total_probability,
-                "no_vig_probability": no_vig_probability,
+                "no_vig_probability": selected_no_vig_probability,
                 "selected_outcome_no_vig_probability": selected_no_vig_probability,
-                "is_inverse_no_selection": market.selection.lower().strip() == "no",
+                "raw_prediction_market_selection": market.selection,
+                "is_inverse_no_selection": False,
                 "outcome_match_score": outcome_score,
                 "observed_at": selected_line.observed_at.isoformat(),
             }
@@ -927,6 +975,7 @@ def _build_explanation_json(
     bookmaker_probabilities: list[dict[str, Any]],
     fair_probability: float,
     consensus_dispersion_value: float,
+    prediction_inputs: PredictionProbabilityInputs,
     edge,
 ) -> dict[str, Any]:
     return {
@@ -950,9 +999,14 @@ def _build_explanation_json(
         "market_probability": {
             "value": edge.market_probability,
             "source": edge.market_probability_source,
-            "bid_probability": prediction_snapshot.bid_probability,
-            "ask_probability": prediction_snapshot.ask_probability,
-            "last_price": prediction_snapshot.last_price,
+            "orientation": prediction_inputs.orientation,
+            "display_outcome": prediction_inputs.display_outcome,
+            "bid_probability": prediction_inputs.bid_probability,
+            "ask_probability": prediction_inputs.ask_probability,
+            "last_price": prediction_inputs.last_price,
+            "raw_bid_probability": prediction_inputs.raw_bid_probability,
+            "raw_ask_probability": prediction_inputs.raw_ask_probability,
+            "raw_last_price": prediction_inputs.raw_last_price,
         },
         "gross_edge": edge.gross_edge,
         "penalties": {
@@ -967,6 +1021,8 @@ def _build_explanation_json(
             "market_id": market.id,
             "event_name": market.event_name,
             "selection": market.selection,
+            "raw_selection": market.selection,
+            "display_outcome": prediction_inputs.display_outcome,
             "normalized_event_key": market.normalized_event_key,
         },
     }

@@ -39,7 +39,10 @@ export function ExplanationPanel({
   const matchConfidence = numberFrom(matchedEvent.confidence_score);
   const marketSource = textFrom(marketProbability.source) ?? "n/a";
   const hasExplanation = Object.keys(explanation).length > 0;
-  const isInverseNoSelection = bookmakers.some((book) => book.is_inverse_no_selection);
+  const rawSelection = textFrom(explanationMarket.raw_selection) ?? textFrom(explanationMarket.selection) ?? market.selection;
+  const probabilityOrientation = textFrom(marketProbability.orientation);
+  const isComplementedNoSelection = probabilityOrientation === "positive_yes_complemented_from_no";
+  const displayOutcome = textFrom(explanationMarket.display_outcome) ?? textFrom(marketProbability.display_outcome) ?? targetOutcome;
 
   return (
     <section className="border border-line bg-ink/70 p-4 sm:p-5">
@@ -59,8 +62,8 @@ export function ExplanationPanel({
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Fact label="Prediction probability" value={formatPercent(numberFrom(marketProbability.value ?? fairValue?.market_probability))} />
-        <Fact label="Fair probability" value={formatPercent(numberFrom(explanation.consensus_fair_probability ?? fairValue?.fair_probability))} />
+        <Fact label="Market YES probability" value={formatPercent(numberFrom(marketProbability.value ?? fairValue?.market_probability))} />
+        <Fact label="Sportsbook fair" value={formatPercent(numberFrom(explanation.consensus_fair_probability ?? fairValue?.fair_probability))} />
         <Fact label="Gross edge" value={formatSignedPercent(numberFrom(explanation.gross_edge ?? fairValue?.gross_edge))} tone="white" />
         <Fact label="Net edge" value={formatSignedPercent(numberFrom(explanation.net_edge ?? fairValue?.net_edge))} tone="mint" />
         <Fact label="Liquidity" value={formatNumber(numberFrom(penalties.liquidity ?? fairValue?.liquidity))} />
@@ -75,8 +78,8 @@ export function ExplanationPanel({
           <div className="mt-4 space-y-3 text-sm">
             <AuditRow label="Sportsbook category" value={textFrom(matchedEvent.event_name) ?? "n/a"} />
             <AuditRow label="Sportsbook selection" value={matchedSelection} />
-            <AuditRow label="Extracted outcome" value={targetOutcome} />
-            <AuditRow label="Prediction side" value={textFrom(explanationMarket.selection) ?? market.selection} />
+            <AuditRow label="Outcome" value={`${displayOutcome} win`} />
+            <AuditRow label="Raw contract side" value={rawSelection} />
             <AuditRow label="Prediction price source" value={marketSource} />
             <AuditRow label="Books used" value={selectedBookmakers.length > 0 ? selectedBookmakers.join(", ") : "n/a"} />
           </div>
@@ -102,8 +105,8 @@ export function ExplanationPanel({
             For outrights, each book&apos;s selected outcome probability is divided by the total implied probability of
             that sportsbook category. Nautilus then applies bookmaker weights and averages those no-vig probabilities
             into the fair value.
-            {isInverseNoSelection
-              ? " Because this prediction-market side is No, Nautilus uses one minus the selected outcome's no-vig probability."
+            {isComplementedNoSelection
+              ? " Because the raw prediction-market side is No, Nautilus displays one minus that market price so the main view stays oriented to the YES/winning outcome."
               : ""}
           </p>
 

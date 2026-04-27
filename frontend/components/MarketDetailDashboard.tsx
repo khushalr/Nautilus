@@ -62,6 +62,7 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
   }
 
   const latest = detail.latest_fair_value;
+  const displayOutcome = outcomeLabel(detail.market, latest);
 
   return (
     <div className="space-y-6">
@@ -92,13 +93,13 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
             </div>
             <h1 className="mt-2 text-2xl font-semibold text-white">{detail.market.event_name}</h1>
             <p className="mt-2 text-sm text-steel">
-              Selection: <span className="text-white">{detail.market.selection}</span> | Start:{" "}
+              Outcome: <span className="text-white">{displayOutcome}</span> | Start:{" "}
               {formatDateTime(detail.market.start_time)}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[520px]">
-            <Metric label="Market" value={formatPercent(latest?.market_probability)} />
-            <Metric label="Fair" value={formatPercent(latest?.fair_probability)} />
+            <Metric label="Market YES" value={formatPercent(latest?.market_probability)} />
+            <Metric label="Sportsbook Fair" value={formatPercent(latest?.fair_probability)} />
             <Metric label="Net edge" value={formatSignedPercent(latest?.net_edge)} tone="mint" />
             <Metric label="Confidence" value={formatPercent(latest?.confidence_score)} />
           </div>
@@ -226,4 +227,26 @@ function formatAmerican(value: number | null): string {
     return "n/a";
   }
   return value > 0 ? `+${value}` : String(value);
+}
+
+function outcomeLabel(market: MarketDetail["market"], fairValue: MarketDetail["latest_fair_value"]): string {
+  const explanation = fairValue?.explanation_json;
+  const explanationMarket = isRecord(explanation?.market) ? explanation.market : {};
+  const marketProbability = isRecord(explanation?.market_probability) ? explanation.market_probability : {};
+  const outcome = textFrom(explanationMarket.display_outcome) ?? textFrom(marketProbability.display_outcome);
+  if (!outcome) {
+    return market.selection;
+  }
+  if (["futures", "awards", "outrights"].includes(market.market_type)) {
+    return `${outcome} win`;
+  }
+  return outcome;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function textFrom(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
