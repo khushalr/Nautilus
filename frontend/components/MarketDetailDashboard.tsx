@@ -105,6 +105,8 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
         </div>
       </section>
 
+      <ExplanationPanel fairValue={latest} market={detail.market} />
+
       <MarketCharts predictionSnapshots={detail.prediction_snapshots} fairValueHistory={detail.fair_value_history} />
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -112,7 +114,6 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
         <AssumptionsPanel fairValue={latest} marketName={detail.market.event_name} />
       </section>
 
-      <ExplanationPanel fairValue={latest} />
     </div>
   );
 }

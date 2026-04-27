@@ -86,7 +86,47 @@ def get_market(market_id: str, db: Session = Depends(get_db)) -> MarketDetailOut
             .limit(200)
         )
     )
-    sportsbook_odds = list(
+    sportsbook_odds = _sportsbook_odds_for_detail(db, market, latest_fair_value)
+    return MarketDetailOut(
+        market=market,
+        latest_fair_value=latest_fair_value,
+        prediction_snapshots=prediction_snapshots,
+        fair_value_history=fair_value_history,
+        sportsbook_odds=sportsbook_odds,
+    )
+
+
+def _sportsbook_odds_for_detail(
+    db: Session,
+    market: Market,
+    latest_fair_value: FairValueSnapshot | None,
+) -> list[SportsbookOddsSnapshot]:
+    explanation = latest_fair_value.explanation_json if latest_fair_value else {}
+    matched_event = explanation.get("matched_event") if isinstance(explanation, dict) else None
+    matched_event_id = matched_event.get("event_id") if isinstance(matched_event, dict) else None
+    bookmakers = explanation.get("bookmakers") if isinstance(explanation, dict) else None
+    matched_selections = {
+        str(book.get("selection"))
+        for book in bookmakers or []
+        if isinstance(book, dict) and book.get("selection")
+    }
+
+    if matched_event_id and matched_selections:
+        return list(
+            db.scalars(
+                select(SportsbookOddsSnapshot)
+                .where(
+                    and_(
+                        SportsbookOddsSnapshot.event_id == str(matched_event_id),
+                        SportsbookOddsSnapshot.selection.in_(matched_selections),
+                    )
+                )
+                .order_by(SportsbookOddsSnapshot.observed_at.desc())
+                .limit(100)
+            )
+        )
+
+    return list(
         db.scalars(
             select(SportsbookOddsSnapshot)
             .join(SportsbookEvent)
@@ -99,13 +139,6 @@ def get_market(market_id: str, db: Session = Depends(get_db)) -> MarketDetailOut
             .order_by(SportsbookOddsSnapshot.observed_at.desc())
             .limit(100)
         )
-    )
-    return MarketDetailOut(
-        market=market,
-        latest_fair_value=latest_fair_value,
-        prediction_snapshots=prediction_snapshots,
-        fair_value_history=fair_value_history,
-        sportsbook_odds=sportsbook_odds,
     )
 
 
