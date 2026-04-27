@@ -22,7 +22,7 @@ from app.schemas import (
     FairValueSnapshotOut,
     MarketDetailOut,
     MarketOut,
-    OpportunityOut,
+    OpportunityScannerOut,
     UserModelCreate,
     UserModelOut,
 )
@@ -142,14 +142,16 @@ def _sportsbook_odds_for_detail(
     )
 
 
-@router.get("/opportunities", response_model=list[OpportunityOut])
+@router.get("/opportunities", response_model=list[OpportunityScannerOut], response_model_exclude_unset=True)
 def list_opportunities(
     db: Session = Depends(get_db),
     min_net_edge: float = Query(default=-1.0),
     min_confidence: float = Query(default=0.0),
     league: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-) -> list[OpportunityOut]:
+    include_debug: bool = Query(default=False),
+    include_raw: bool = Query(default=False),
+) -> list[OpportunityScannerOut]:
     latest = _latest_fair_value_query().subquery()
     stmt = (
         select(Market, FairValueSnapshot)
@@ -167,12 +169,90 @@ def list_opportunities(
     if league:
         stmt = stmt.where(Market.league == league)
 
-    return [OpportunityOut(market=market, fair_value=fair_value) for market, fair_value in db.execute(stmt).all()]
+    return [
+        _opportunity_scanner_row(market, fair_value, include_debug=include_debug, include_raw=include_raw)
+        for market, fair_value in db.execute(stmt).all()
+    ]
 
 
 @router.get("/opportunities/{market_id}", response_model=MarketDetailOut)
 def get_opportunity(market_id: str, db: Session = Depends(get_db)) -> MarketDetailOut:
     return get_market(market_id, db)
+
+
+def _opportunity_scanner_row(
+    market: Market,
+    fair_value: FairValueSnapshot,
+    *,
+    include_debug: bool,
+    include_raw: bool,
+) -> OpportunityScannerOut:
+    explanation = fair_value.explanation_json if isinstance(fair_value.explanation_json, dict) else {}
+    matched_event = explanation.get("matched_event") if isinstance(explanation.get("matched_event"), dict) else {}
+    market_probability = explanation.get("market_probability") if isinstance(explanation.get("market_probability"), dict) else {}
+    explanation_market = explanation.get("market") if isinstance(explanation.get("market"), dict) else {}
+    bookmakers = explanation.get("bookmakers") if isinstance(explanation.get("bookmakers"), list) else []
+    selected_bookmakers = explanation.get("selected_bookmakers")
+    sportsbooks_used = (
+        [str(bookmaker) for bookmaker in selected_bookmakers if bookmaker]
+        if isinstance(selected_bookmakers, list)
+        else [
+            str(book.get("bookmaker"))
+            for book in bookmakers
+            if isinstance(book, dict) and book.get("bookmaker")
+        ]
+    )
+    matched_selection = next(
+        (
+            str(book.get("selection"))
+            for book in bookmakers
+            if isinstance(book, dict) and book.get("selection")
+        ),
+        None,
+    )
+    display_outcome = _string_or_none(explanation_market.get("display_outcome")) or _string_or_none(
+        market_probability.get("display_outcome")
+    )
+
+    payload = OpportunityScannerOut(
+        market_id=market.id,
+        title=market.event_name,
+        source=market.source,
+        external_id=market.external_id,
+        league=market.league,
+        market_type=market.market_type,
+        outcome=display_outcome,
+        display_outcome=display_outcome,
+        start_time=market.start_time,
+        status=market.status,
+        market_url=market.market_url,
+        market_probability=fair_value.market_probability,
+        fair_probability=fair_value.fair_probability,
+        gross_edge=fair_value.gross_edge,
+        net_edge=fair_value.net_edge,
+        spread=fair_value.spread,
+        liquidity=fair_value.liquidity,
+        confidence_score=fair_value.confidence_score,
+        matched_sportsbook_category=_string_or_none(matched_event.get("event_name")),
+        matched_selection=matched_selection,
+        match_confidence=_float_or_none(matched_event.get("confidence_score")),
+        sportsbooks_used=sportsbooks_used,
+        last_updated=fair_value.observed_at,
+    )
+    if include_debug:
+        payload.assumptions = fair_value.assumptions
+        payload.explanation_json = explanation
+    if include_raw:
+        payload.market_extra = market.extra
+    return payload
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _float_or_none(value: object) -> float | None:
+    return value if isinstance(value, float | int) else None
 
 
 @router.get("/fair-values/latest", response_model=list[FairValueSnapshotOut])

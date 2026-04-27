@@ -39,112 +39,130 @@ const now = new Date("2026-04-26T18:00:00Z").toISOString();
 
 export const sampleOpportunities: Opportunity[] = [
   {
-    market: {
-      id: "sample-chiefs",
-      source: "polymarket",
-      external_id: "sample-chiefs",
-      event_name: "Kansas City Chiefs at Buffalo Bills",
-      league: "NFL",
-      market_type: "moneyline",
-      selection: "Kansas City Chiefs",
-      normalized_event_key: "nfl:2026-09-14:buf-vs-kc",
-      start_time: "2026-09-14T00:20:00Z",
-      status: "open",
-      market_url: null,
-      extra: {}
-    },
-    fair_value: {
-      id: "fv-chiefs",
-      market_id: "sample-chiefs",
-      fair_probability: 0.548,
-      market_probability: 0.505,
-      gross_edge: 0.043,
-      net_edge: 0.031,
-      spread: 0.018,
-      liquidity: 18400,
-      confidence_score: 0.82,
-      sportsbook_consensus: { books: 6 },
-      assumptions: {},
-      explanation_json: {},
-      explanation: "Consensus sportsbook price after removing two-way vig.",
-      observed_at: now
-    }
+    market_id: "sample-chiefs",
+    title: "Kansas City Chiefs at Buffalo Bills",
+    source: "polymarket",
+    external_id: "sample-chiefs",
+    league: "NFL",
+    market_type: "moneyline",
+    outcome: "Kansas City Chiefs",
+    display_outcome: "Kansas City Chiefs",
+    start_time: "2026-09-14T00:20:00Z",
+    status: "open",
+    market_url: null,
+    market_probability: 0.505,
+    fair_probability: 0.548,
+    gross_edge: 0.043,
+    net_edge: 0.031,
+    spread: 0.018,
+    liquidity: 18400,
+    confidence_score: 0.82,
+    matched_sportsbook_category: "Kansas City Chiefs at Buffalo Bills",
+    matched_selection: "Kansas City Chiefs",
+    match_confidence: 0.9,
+    sportsbooks_used: ["draftkings", "fanduel", "pinnacle"],
+    last_updated: now
   },
   {
-    market: {
-      id: "sample-celtics",
-      source: "kalshi",
-      external_id: "sample-celtics",
-      event_name: "Boston Celtics vs New York Knicks",
-      league: "NBA",
-      market_type: "moneyline",
-      selection: "Boston Celtics",
-      normalized_event_key: "nba:2026-05-03:bos-vs-nyk",
-      start_time: "2026-05-03T23:00:00Z",
-      status: "open",
-      market_url: null,
-      extra: {}
-    },
-    fair_value: {
-      id: "fv-celtics",
-      market_id: "sample-celtics",
-      fair_probability: 0.612,
-      market_probability: 0.586,
-      gross_edge: 0.026,
-      net_edge: 0.018,
-      spread: 0.012,
-      liquidity: 9200,
-      confidence_score: 0.76,
-      sportsbook_consensus: { books: 5 },
-      assumptions: {},
-      explanation_json: {},
-      explanation: "Consensus sportsbook price after removing two-way vig.",
-      observed_at: now
-    }
+    market_id: "sample-celtics",
+    title: "Boston Celtics vs New York Knicks",
+    source: "kalshi",
+    external_id: "sample-celtics",
+    league: "NBA",
+    market_type: "moneyline",
+    outcome: "Boston Celtics",
+    display_outcome: "Boston Celtics",
+    start_time: "2026-05-03T23:00:00Z",
+    status: "open",
+    market_url: null,
+    market_probability: 0.586,
+    fair_probability: 0.612,
+    gross_edge: 0.026,
+    net_edge: 0.018,
+    spread: 0.012,
+    liquidity: 9200,
+    confidence_score: 0.76,
+    matched_sportsbook_category: "Boston Celtics vs New York Knicks",
+    matched_selection: "Boston Celtics",
+    match_confidence: 0.86,
+    sportsbooks_used: ["draftkings", "fanduel"],
+    last_updated: now
   },
   {
-    market: {
-      id: "sample-dodgers",
-      source: "polymarket",
-      external_id: "sample-dodgers",
-      event_name: "Los Angeles Dodgers at San Diego Padres",
-      league: "MLB",
-      market_type: "moneyline",
-      selection: "San Diego Padres",
-      normalized_event_key: "mlb:2026-04-27:lad-vs-sd",
-      start_time: "2026-04-27T02:10:00Z",
-      status: "open",
-      market_url: null,
-      extra: {}
-    },
-    fair_value: {
-      id: "fv-padres",
-      market_id: "sample-dodgers",
-      fair_probability: 0.471,
-      market_probability: 0.462,
-      gross_edge: 0.009,
-      net_edge: 0.002,
-      spread: 0.01,
-      liquidity: 2400,
-      confidence_score: 0.61,
-      sportsbook_consensus: { books: 4 },
-      assumptions: {},
-      explanation_json: {},
-      explanation: "Consensus sportsbook price after removing two-way vig.",
-      observed_at: now
-    }
+    market_id: "sample-dodgers",
+    title: "Los Angeles Dodgers at San Diego Padres",
+    source: "polymarket",
+    external_id: "sample-dodgers",
+    league: "MLB",
+    market_type: "moneyline",
+    outcome: "San Diego Padres",
+    display_outcome: "San Diego Padres",
+    start_time: "2026-04-27T02:10:00Z",
+    status: "open",
+    market_url: null,
+    market_probability: 0.462,
+    fair_probability: 0.471,
+    gross_edge: 0.009,
+    net_edge: 0.002,
+    spread: 0.01,
+    liquidity: 2400,
+    confidence_score: 0.61,
+    matched_sportsbook_category: "Los Angeles Dodgers at San Diego Padres",
+    matched_selection: "San Diego Padres",
+    match_confidence: 0.75,
+    sportsbooks_used: ["draftkings"],
+    last_updated: now
   }
 ];
 
 export function sampleMarketDetail(id: string): MarketDetail {
-  const opportunity = sampleOpportunities.find((item) => item.market.id === id) ?? sampleOpportunities[0];
+  const opportunity = sampleOpportunities.find((item) => item.market_id === id) ?? sampleOpportunities[0];
+  const market = {
+    id: opportunity.market_id,
+    source: opportunity.source,
+    external_id: opportunity.external_id,
+    event_name: opportunity.title,
+    league: opportunity.league,
+    market_type: opportunity.market_type,
+    selection: opportunity.display_outcome ?? opportunity.outcome ?? "Yes",
+    normalized_event_key: `${opportunity.league ?? "sample"}:${opportunity.market_id}`,
+    start_time: opportunity.start_time,
+    status: opportunity.status,
+    market_url: opportunity.market_url,
+    extra: {}
+  };
+  const fairValue = {
+    id: `fv-${opportunity.market_id}`,
+    market_id: opportunity.market_id,
+    fair_probability: opportunity.fair_probability,
+    market_probability: opportunity.market_probability,
+    gross_edge: opportunity.gross_edge,
+    net_edge: opportunity.net_edge,
+    spread: opportunity.spread,
+    liquidity: opportunity.liquidity,
+    confidence_score: opportunity.confidence_score,
+    sportsbook_consensus: { books: opportunity.sportsbooks_used.length },
+    assumptions: {},
+    explanation_json: {
+      selected_bookmakers: opportunity.sportsbooks_used,
+      market: { display_outcome: opportunity.display_outcome, selection: market.selection },
+      market_probability: { value: opportunity.market_probability, source: "sample", display_outcome: opportunity.display_outcome },
+      matched_event: {
+        event_name: opportunity.matched_sportsbook_category,
+        confidence_score: opportunity.match_confidence,
+        reason: "Bundled sample match."
+      }
+    },
+    explanation: "Consensus sportsbook price after removing vig.",
+    observed_at: opportunity.last_updated
+  };
   const baseTime = Date.parse("2026-04-26T14:00:00Z");
   const prediction_snapshots = Array.from({ length: 18 }, (_, index) => {
-    const marketProbability = opportunity.fair_value.market_probability + Math.sin(index / 2) * 0.01 - 0.012 + index * 0.001;
+    const marketProbability = opportunity.market_probability + Math.sin(index / 2) * 0.01 - 0.012 + index * 0.001;
     return {
       id: `pm-${index}`,
-      market_id: opportunity.market.id,
-      source: opportunity.market.source,
+      market_id: market.id,
+      source: market.source,
       bid_probability: marketProbability - 0.009,
       ask_probability: marketProbability + 0.009,
       last_price: marketProbability,
@@ -156,17 +174,17 @@ export function sampleMarketDetail(id: string): MarketDetail {
     };
   });
   const fair_value_history = prediction_snapshots.map((snapshot, index) => ({
-    ...opportunity.fair_value,
+    ...fairValue,
     id: `fv-${index}`,
     market_probability: snapshot.midpoint_probability,
-    fair_probability: opportunity.fair_value.fair_probability + Math.cos(index / 3) * 0.006,
-    gross_edge: opportunity.fair_value.fair_probability - snapshot.midpoint_probability,
-    net_edge: opportunity.fair_value.fair_probability - snapshot.midpoint_probability - 0.012,
+    fair_probability: opportunity.fair_probability + Math.cos(index / 3) * 0.006,
+    gross_edge: opportunity.fair_probability - snapshot.midpoint_probability,
+    net_edge: opportunity.fair_probability - snapshot.midpoint_probability - 0.012,
     observed_at: snapshot.observed_at
   }));
   return {
-    market: opportunity.market,
-    latest_fair_value: opportunity.fair_value,
+    market,
+    latest_fair_value: fairValue,
     prediction_snapshots,
     fair_value_history,
     sportsbook_odds: [
@@ -174,7 +192,7 @@ export function sampleMarketDetail(id: string): MarketDetail {
         id: "dk",
         bookmaker: "draftkings",
         market_type: "moneyline",
-        selection: opportunity.market.selection,
+        selection: market.selection,
         american_odds: -118,
         decimal_odds: 1.85,
         implied_probability: 0.541,
@@ -184,7 +202,7 @@ export function sampleMarketDetail(id: string): MarketDetail {
         id: "fd",
         bookmaker: "fanduel",
         market_type: "moneyline",
-        selection: opportunity.market.selection,
+        selection: market.selection,
         american_odds: -122,
         decimal_odds: 1.82,
         implied_probability: 0.55,
@@ -194,7 +212,7 @@ export function sampleMarketDetail(id: string): MarketDetail {
         id: "pin",
         bookmaker: "pinnacle",
         market_type: "moneyline",
-        selection: opportunity.market.selection,
+        selection: market.selection,
         american_odds: -115,
         decimal_odds: 1.87,
         implied_probability: 0.535,

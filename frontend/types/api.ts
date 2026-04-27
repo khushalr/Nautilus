@@ -56,8 +56,32 @@ export type SportsbookOddsSnapshot = {
 };
 
 export type Opportunity = {
-  market: Market;
-  fair_value: FairValueSnapshot;
+  market_id: string;
+  title: string;
+  source: string;
+  external_id: string;
+  league: string | null;
+  market_type: string;
+  outcome: string | null;
+  display_outcome: string | null;
+  start_time: string | null;
+  status: string;
+  market_url: string | null;
+  market_probability: number;
+  fair_probability: number;
+  gross_edge: number;
+  net_edge: number;
+  spread: number | null;
+  liquidity: number | null;
+  confidence_score: number;
+  matched_sportsbook_category: string | null;
+  matched_selection: string | null;
+  match_confidence: number | null;
+  sportsbooks_used: string[];
+  last_updated: string;
+  assumptions?: Record<string, unknown>;
+  explanation_json?: Record<string, unknown>;
+  market_extra?: Record<string, unknown>;
 };
 
 export type MarketDetail = {

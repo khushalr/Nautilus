@@ -82,6 +82,35 @@ class OpportunityOut(BaseModel):
     fair_value: FairValueSnapshotOut
 
 
+class OpportunityScannerOut(BaseModel):
+    market_id: str
+    title: str
+    source: str
+    external_id: str
+    league: str | None = None
+    market_type: str
+    outcome: str | None = None
+    display_outcome: str | None = None
+    start_time: datetime | None = None
+    status: str
+    market_url: str | None = None
+    market_probability: float
+    fair_probability: float
+    gross_edge: float
+    net_edge: float
+    spread: float | None = None
+    liquidity: float | None = None
+    confidence_score: float
+    matched_sportsbook_category: str | None = None
+    matched_selection: str | None = None
+    match_confidence: float | None = None
+    sportsbooks_used: list[str] = Field(default_factory=list)
+    last_updated: datetime
+    assumptions: dict[str, Any] | None = None
+    explanation_json: dict[str, Any] | None = None
+    market_extra: dict[str, Any] | None = None
+
+
 class UserModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     config: dict[str, Any] = Field(default_factory=dict)

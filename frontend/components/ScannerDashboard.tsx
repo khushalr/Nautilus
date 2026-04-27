@@ -63,23 +63,23 @@ export function ScannerDashboard() {
   }, []);
 
   const filterOptions = useMemo(() => {
-    const leagues = Array.from(new Set(opportunities.map((item) => item.market.league).filter(Boolean) as string[])).sort();
-    const sources = Array.from(new Set(opportunities.map((item) => item.market.source))).sort();
+    const leagues = Array.from(new Set(opportunities.map((item) => item.league).filter(Boolean) as string[])).sort();
+    const sources = Array.from(new Set(opportunities.map((item) => item.source))).sort();
     return { leagues, sources };
   }, [opportunities]);
 
   const filtered = useMemo(() => {
     return opportunities
-      .filter((item) => item.fair_value.net_edge >= filters.minNetEdge)
-      .filter((item) => item.fair_value.spread == null || item.fair_value.spread <= filters.maxSpread)
-      .filter((item) => item.fair_value.liquidity == null || item.fair_value.liquidity >= filters.minLiquidity)
-      .filter((item) => filters.league === "all" || item.market.league === filters.league)
-      .filter((item) => filters.source === "all" || item.market.source === filters.source)
-      .sort((a, b) => b.fair_value.net_edge - a.fair_value.net_edge);
+      .filter((item) => item.net_edge >= filters.minNetEdge)
+      .filter((item) => item.spread == null || item.spread <= filters.maxSpread)
+      .filter((item) => item.liquidity == null || item.liquidity >= filters.minLiquidity)
+      .filter((item) => filters.league === "all" || item.league === filters.league)
+      .filter((item) => filters.source === "all" || item.source === filters.source)
+      .sort((a, b) => b.net_edge - a.net_edge);
   }, [filters, opportunities]);
 
-  const best = filtered[0]?.fair_value;
-  const averageConfidence = filtered.reduce((total, item) => total + item.fair_value.confidence_score, 0) / Math.max(filtered.length, 1);
+  const best = filtered[0];
+  const averageConfidence = filtered.reduce((total, item) => total + item.confidence_score, 0) / Math.max(filtered.length, 1);
 
   return (
     <div className="space-y-6">

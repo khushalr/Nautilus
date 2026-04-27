@@ -115,8 +115,10 @@ docker compose exec backend python -m app.jobs.compute_fair_values
 - `GET /health`
 - `GET /markets`
 - `GET /markets/{id}`
-- `GET /opportunities`
-- `GET /opportunities/{market_id}`
+- `GET /opportunities`: lightweight scanner rows only. The default response excludes raw provider payloads, market metadata JSON, user assumptions, and full explanation JSON.
+- `GET /opportunities?include_debug=true`: adds assumptions and explanation JSON for debugging.
+- `GET /opportunities?include_raw=true`: adds raw market metadata for debugging.
+- `GET /opportunities/{market_id}`: detail response with explanation data for the selected market.
 - `GET /fair-values/latest`
 - `POST /user-models`
 - `GET /user-models`
@@ -129,16 +131,24 @@ docker compose exec backend python -m app.jobs.compute_fair_values
 2. For two-sided sportsbook markets, remove vig by normalizing both sides so their probabilities sum to 100%.
 3. For futures and awards, use sportsbook `outrights` odds when available and remove vig by normalizing all outcomes in the outright market for each bookmaker.
 4. Calculate prediction-market midpoint from bid/ask when both are available, otherwise from the best available price.
-5. Calculate gross edge as `fair_probability - market_probability`.
-6. Calculate spread and liquidity penalties.
-7. Calculate net edge as `gross_edge - spread_penalty - liquidity_penalty`.
-8. Calculate confidence from sportsbook count, spread quality, liquidity, and sportsbook consensus dispersion.
+5. Orient futures, awards, and outright markets around the positive YES/winning outcome. If a raw Polymarket contract is stored as `No`, Nautilus displays and scores `1 - no_probability` as the market YES probability.
+6. Calculate gross edge as `sportsbook_fair_probability_of_winning - prediction_market_yes_probability`.
+7. Calculate spread and liquidity penalties.
+8. Calculate net edge as `gross_edge - spread_penalty - liquidity_penalty`.
+9. Calculate confidence from sportsbook count, spread quality, liquidity, and sportsbook consensus dispersion.
 
 Supported fair-value routes:
 
 - `h2h`: prediction-market H2H/game markets compared against sportsbook H2H moneyline odds.
 - `futures`: team/championship/conference/division-style prediction markets compared against sportsbook `outrights` odds when The Odds API returns matching outcomes.
 - `awards`: player award markets compared against sportsbook `outrights` odds when The Odds API returns matching award outcomes.
+
+The scanner and detail UI use this same orientation:
+
+- H2H rows show the selected team/outcome probability.
+- Futures/awards/outrights rows show `Market YES` for the named team/player/outcome winning.
+- `Sportsbook Fair` is the no-vig sportsbook probability for that same winning outcome.
+- Raw YES/NO contract side and provider payloads remain available only in detail/debug views.
 
 Limitations:
 
