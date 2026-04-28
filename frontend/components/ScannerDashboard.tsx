@@ -95,8 +95,9 @@ export function ScannerDashboard() {
           <div className="max-w-4xl">
             <h1 className="text-2xl font-semibold tracking-normal text-white">Nautilus scanner</h1>
             <p className="mt-2 text-sm leading-6 text-steel">
-              Nautilus ranks prediction-market opportunities by comparing market price with weighted no-vig sportsbook
-              fair value, then subtracting spread and liquidity penalties.
+              Nautilus compares prediction-market YES prices with sportsbook-derived no-vig fair probabilities and
+              surfaces possible pricing disagreements. It is research software: it does not place trades, accept bets,
+              hold funds, or provide personalized betting or financial advice.
             </p>
           </div>
           <div className="flex gap-2">

@@ -21,6 +21,8 @@ from app.services.collectors.odds_api import (
 from app.services.collectors.polymarket import PolymarketCollector, _quotes_from_market
 from app.services.fair_value import american_to_probability, decimal_to_probability
 from app.services.market_classification import classify_prediction_market, effective_prediction_market_type
+from app.services.odds_quota import parse_quota_headers, redact_api_key, should_send_quota_email, mark_quota_email_sent
+from app.services.opportunity_status import opportunity_status_label
 
 
 @pytest.fixture()
@@ -40,6 +42,55 @@ def test_odds_conversion() -> None:
     assert american_to_probability(-150) == pytest.approx(0.6)
     assert american_to_probability(200) == pytest.approx(1 / 3)
     assert decimal_to_probability(2.5) == pytest.approx(0.4)
+
+
+def test_american_odds_implied_probability_examples() -> None:
+    assert american_to_probability(400) == pytest.approx(0.20)
+    assert american_to_probability(-150) == pytest.approx(0.60)
+
+
+def test_decimal_odds_implied_probability_examples() -> None:
+    assert decimal_to_probability(5.00) == pytest.approx(0.20)
+
+
+def test_two_way_no_vig_normalization_example() -> None:
+    from app.services.fair_value import remove_vig_two_way
+
+    side_a, side_b = remove_vig_two_way(0.58, 0.48)
+
+    assert side_a == pytest.approx(0.5471698)
+    assert side_b == pytest.approx(0.4528302)
+
+
+def test_opportunity_status_labels() -> None:
+    assert opportunity_status_label(0.02) == "Possible YES underpricing"
+    assert opportunity_status_label(-0.02) == "Possible YES overpricing"
+    assert opportunity_status_label(0.0001) == "Near fair value"
+
+
+def test_odds_api_quota_header_parsing_and_redaction() -> None:
+    quota = parse_quota_headers(
+        {
+            "x-requests-remaining": "49",
+            "x-requests-used": "451",
+            "x-requests-last": "2",
+        }
+    )
+
+    assert quota.remaining == 49
+    assert quota.used == 451
+    assert quota.last == 2
+    assert "secret" not in redact_api_key("https://api.example.test?apiKey=secret&markets=h2h")
+
+
+def test_odds_api_quota_email_cooldown(tmp_path) -> None:
+    state_file = tmp_path / "quota.json"
+    now = datetime(2026, 4, 27, 12, tzinfo=UTC)
+
+    assert should_send_quota_email(state_file=str(state_file), cooldown_hours=6, now=now)
+    mark_quota_email_sent(state_file=str(state_file), now=now)
+    assert not should_send_quota_email(state_file=str(state_file), cooldown_hours=6, now=now)
+    assert should_send_quota_email(state_file=str(state_file), cooldown_hours=6, now=now.replace(hour=19))
 
 
 def test_odds_api_outrights_market_support_uses_sport_metadata() -> None:

@@ -8,6 +8,7 @@ import { ExplanationPanel } from "@/components/ExplanationPanel";
 import { MarketCharts } from "@/components/MarketCharts";
 import { apiUrl, sampleMarketDetail, sampleOpportunityHistory } from "@/lib/api";
 import { formatDateTime, formatPercent, formatSignedPercent, sourceLabel } from "@/lib/format";
+import { opportunityStatus } from "@/lib/opportunityStatus";
 import type { MarketDetail, OpportunityHistoryRow } from "@/types/api";
 
 export function MarketDetailDashboard({ marketId }: { marketId: string }) {
@@ -72,6 +73,7 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
 
   const latest = detail.latest_fair_value;
   const displayOutcome = outcomeLabel(detail.market, latest);
+  const status = opportunityStatus(latest?.net_edge);
 
   return (
     <div className="space-y-6">
@@ -105,6 +107,7 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
               Outcome: <span className="text-white">{displayOutcome}</span> | Start:{" "}
               {formatDateTime(detail.market.start_time)}
             </p>
+            <div className={`mt-3 inline-flex border px-2 py-1 text-xs ${statusClass(status.tone)}`}>{status.label}</div>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:min-w-[520px]">
             <Metric label="Market YES" value={formatPercent(latest?.market_probability)} />
@@ -113,6 +116,15 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
             <Metric label="Confidence" value={formatPercent(latest?.confidence_score)} />
           </div>
         </div>
+      </section>
+
+      <section className="border border-line bg-ink/70 p-4 text-sm leading-6 text-steel">
+        <div className="text-xs uppercase tracking-[0.16em] text-steel">How to read this</div>
+        <p className="mt-2">
+          This page compares the prediction-market YES probability for the named outcome with the no-vig sportsbook fair
+          probability for the matched sportsbook category and selection. The edge is a pricing disagreement, not a
+          recommendation.
+        </p>
       </section>
 
       <ExplanationPanel fairValue={latest} market={detail.market} />
@@ -277,6 +289,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function textFrom(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function statusClass(tone: ReturnType<typeof opportunityStatus>["tone"]): string {
+  if (tone === "positive") {
+    return "border-mint/35 bg-mint/10 text-mint";
+  }
+  if (tone === "negative") {
+    return "border-amber/35 bg-amber/10 text-amber";
+  }
+  return "border-line bg-panel text-steel";
 }
 
 function summarizeHistory(history: OpportunityHistoryRow[]) {

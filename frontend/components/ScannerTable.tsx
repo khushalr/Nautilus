@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import type { Opportunity } from "@/types/api";
 import { formatDateTime, formatPercent, formatSignedPercent, sourceLabel } from "@/lib/format";
+import { opportunityStatus } from "@/lib/opportunityStatus";
 
 export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }) {
   return (
@@ -21,7 +22,12 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
               <th className="px-4 py-3 text-right font-medium">Market YES</th>
               <th className="px-4 py-3 text-right font-medium">Sportsbook Fair</th>
               <th className="px-4 py-3 text-right font-medium">Gross edge</th>
-              <th className="px-4 py-3 text-right font-medium">Net edge</th>
+              <th
+                className="px-4 py-3 text-right font-medium"
+                title="Sportsbook Fair - Market YES. Positive means YES may be underpriced relative to sportsbook fair value."
+              >
+                Net Edge
+              </th>
               <th className="px-4 py-3 text-right font-medium">Spread</th>
               <th className="px-4 py-3 text-right font-medium">Liquidity</th>
               <th className="px-4 py-3 text-right font-medium">Confidence</th>
@@ -38,6 +44,7 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
             ) : (
               opportunities.map((opportunity) => {
                 const displayOutcome = outcomeLabel(opportunity);
+                const status = opportunityStatus(opportunity.net_edge);
                 return (
                 <tr key={`${opportunity.market_id}-${opportunity.last_updated}`} className="border-b border-line/70 transition hover:bg-panel/70">
                   <td className="px-4 py-4">
@@ -45,6 +52,7 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
                       <div>
                         <div className="font-medium text-white">{opportunity.title}</div>
                         <div className="mt-1 text-xs text-steel">Outcome: {displayOutcome}</div>
+                        <div className={`mt-2 inline-flex border px-2 py-1 text-xs ${statusClass(status.tone)}`}>{status.label}</div>
                       </div>
                       <ArrowUpRight className="mt-1 h-4 w-4 shrink-0 text-steel transition group-hover:text-mint" />
                     </Link>
@@ -73,6 +81,16 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
       </div>
     </div>
   );
+}
+
+function statusClass(tone: ReturnType<typeof opportunityStatus>["tone"]): string {
+  if (tone === "positive") {
+    return "border-mint/35 bg-mint/10 text-mint";
+  }
+  if (tone === "negative") {
+    return "border-amber/35 bg-amber/10 text-amber";
+  }
+  return "border-line bg-panel text-steel";
 }
 
 function formatLiquidity(value: number | null): string {

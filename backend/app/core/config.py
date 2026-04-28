@@ -44,6 +44,15 @@ class Settings(BaseSettings):
         default="h2h,outrights",
         alias="SPORTSBOOK_MARKETS_TO_COLLECT",
     )
+    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
+    alert_email_from: str | None = Field(default=None, alias="ALERT_EMAIL_FROM")
+    alert_email_to: str | None = Field(default=None, alias="ALERT_EMAIL_TO")
+    odds_api_low_quota_threshold: int = Field(default=50, alias="ODDS_API_LOW_QUOTA_THRESHOLD")
+    odds_api_quota_email_cooldown_hours: int = Field(default=6, alias="ODDS_API_QUOTA_EMAIL_COOLDOWN_HOURS")
+    odds_api_quota_state_file: str = Field(default="/tmp/nautilus_odds_api_quota_email.json", alias="ODDS_API_QUOTA_STATE_FILE")
 
     default_user_model: dict[str, object] = {
         "min_edge": 0.03,

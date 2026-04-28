@@ -12,6 +12,12 @@ from app.services.collectors.base import CollectionResult, CollectorAdapter, Per
 from app.services.collectors.persistence import persist_sportsbook_result
 from app.services.fair_value import american_to_probability, decimal_to_probability
 from app.services.normalization import normalized_event_key
+from app.services.odds_quota import (
+    maybe_notify_low_quota,
+    notify_quota_failure,
+    parse_quota_headers,
+    redact_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +54,7 @@ class OddsApiCollector(CollectorAdapter):
                         outrights_only=sport not in self.sports,
                     )
                 except httpx.HTTPError as exc:
-                    logger.warning("The Odds API collection failed for %s: %s", sport, exc)
+                    logger.warning("The Odds API collection failed for %s: %s", sport, redact_api_key(str(exc)))
                     failures.append(f"{sport}: {exc}")
                     continue
                 events.extend(sport_events)
@@ -101,6 +107,8 @@ class OddsApiCollector(CollectorAdapter):
         event_lookup: dict[str, dict[str, Any]] = {}
         try:
             events_response = await client.get(f"/sports/{sport}/events", params=event_params)
+            self._log_and_notify_quota(events_response, f"{sport}/events")
+            self._raise_for_quota(events_response, f"{sport}/events")
             events_response.raise_for_status()
             event_payload = events_response.json()
             event_lookup = {
@@ -109,8 +117,10 @@ class OddsApiCollector(CollectorAdapter):
                 if isinstance(event, dict) and event.get("id") is not None
             } if isinstance(event_payload, list) else {}
         except httpx.HTTPError as exc:
-            logger.info("The Odds API events endpoint unavailable for %s; continuing with odds payload only: %s", sport, exc)
+            logger.info("The Odds API events endpoint unavailable for %s; continuing with odds payload only: %s", sport, redact_api_key(str(exc)))
         odds_response = await client.get(f"/sports/{sport}/odds", params=odds_params)
+        self._log_and_notify_quota(odds_response, f"{sport}/odds")
+        self._raise_for_quota(odds_response, f"{sport}/odds")
         odds_response.raise_for_status()
 
         odds_payload = odds_response.json()
@@ -184,9 +194,11 @@ class OddsApiCollector(CollectorAdapter):
     async def _sport_metadata(self, client: httpx.AsyncClient) -> dict[str, dict[str, Any]]:
         try:
             response = await client.get("/sports", params={"apiKey": self.settings.the_odds_api_key})
+            self._log_and_notify_quota(response, "sports metadata")
+            self._raise_for_quota(response, "sports metadata")
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.info("Could not load The Odds API sport metadata; requesting configured markets directly: %s", exc)
+            logger.info("Could not load The Odds API sport metadata; requesting configured markets directly: %s", redact_api_key(str(exc)))
             return {}
         payload = response.json()
         if not isinstance(payload, list):
@@ -196,6 +208,22 @@ class OddsApiCollector(CollectorAdapter):
             for sport in payload
             if isinstance(sport, dict) and sport.get("key")
         }
+
+    def _log_and_notify_quota(self, response: httpx.Response, context: str) -> None:
+        maybe_notify_low_quota(self.settings, parse_quota_headers(response.headers), context=context)
+
+    def _raise_for_quota(self, response: httpx.Response, context: str) -> None:
+        body = response.text[:1000]
+        quota_failure = response.status_code == 429 or "OUT_OF_USAGE_CREDITS" in body
+        if not quota_failure:
+            return
+        reason = f"status={response.status_code} body={body}"
+        notify_quota_failure(self.settings, reason=reason, context=context)
+        raise httpx.HTTPStatusError(
+            f"The Odds API quota/rate limit for {context}: {redact_api_key(reason)}",
+            request=response.request,
+            response=response,
+        )
 
 
 def _event_record_from_payload(
