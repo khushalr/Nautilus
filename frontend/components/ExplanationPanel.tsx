@@ -43,6 +43,7 @@ export function ExplanationPanel({
   const probabilityOrientation = textFrom(marketProbability.orientation);
   const isComplementedNoSelection = probabilityOrientation === "positive_yes_complemented_from_no";
   const displayOutcome = textFrom(explanationMarket.display_outcome) ?? textFrom(marketProbability.display_outcome) ?? targetOutcome;
+  const isH2H = market.market_type === "h2h_game" || market.market_type === "h2h";
 
   return (
     <section className="border border-line bg-ink/70 p-4 sm:p-5">
@@ -52,7 +53,8 @@ export function ExplanationPanel({
           <h2 className="mt-2 text-xl font-semibold text-white">{textFrom(explanationMarket.event_name) ?? market.event_name}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-steel">
             Nautilus compares the displayed prediction-market probability with a no-vig sportsbook consensus for the
-            matched category and selection. This is market-data analysis, not betting advice or trade execution.
+            matched {isH2H ? "game and moneyline selection" : "category and selection"}. This is market-data analysis,
+            not betting advice or trade execution.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 border border-mint/30 bg-mint/10 px-3 py-2 text-sm text-mint">
@@ -78,6 +80,8 @@ export function ExplanationPanel({
           <div className="mt-4 space-y-3 text-sm">
             <AuditRow label="Sportsbook category" value={textFrom(matchedEvent.event_name) ?? "n/a"} />
             <AuditRow label="Sportsbook selection" value={matchedSelection} />
+            {isH2H ? <AuditRow label="Target team" value={textFrom(matchedEvent.target_team) ?? displayOutcome} /> : null}
+            {isH2H ? <AuditRow label="Opponent" value={textFrom(matchedEvent.opponent) ?? "n/a"} /> : null}
             <AuditRow label="Outcome" value={`${displayOutcome} win`} />
             <AuditRow label="Raw contract side" value={rawSelection} />
             <AuditRow label="Prediction price source" value={marketSource} />
@@ -102,9 +106,9 @@ export function ExplanationPanel({
         <div className="border border-line bg-panel/40 p-4">
           <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-steel">No-Vig Calculation</h3>
           <p className="mt-3 text-sm leading-6 text-steel">
-            For outrights, each book&apos;s selected outcome probability is divided by the total implied probability of
-            that sportsbook category. Nautilus then applies bookmaker weights and averages those no-vig probabilities
-            into the fair value.
+            {isH2H
+              ? "For H2H games, each book's moneyline outcomes are converted to implied probabilities and normalized so the game outcomes sum to 100%. Nautilus then applies bookmaker weights and averages the selected team's no-vig probabilities into the fair value."
+              : "For outrights, each book's selected outcome probability is divided by the total implied probability of that sportsbook category. Nautilus then applies bookmaker weights and averages those no-vig probabilities into the fair value."}
             {isComplementedNoSelection
               ? " Because the raw prediction-market side is No, Nautilus displays one minus that market price so the main view stays oriented to the YES/winning outcome."
               : ""}

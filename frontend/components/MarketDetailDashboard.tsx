@@ -100,7 +100,7 @@ export function MarketDetailDashboard({ marketId }: { marketId: string }) {
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div className="max-w-3xl">
             <div className="text-xs uppercase tracking-[0.18em] text-steel">
-              {sourceLabel(detail.market.source)} | {detail.market.league ?? "Unknown league"} | {detail.market.market_type}
+              {sourceLabel(detail.market.source)} | {detail.market.league ?? "Unknown league"} | {marketTypeLabel(detail.market.market_type)}
             </div>
             <h1 className="mt-2 text-2xl font-semibold text-white">{detail.market.event_name}</h1>
             <p className="mt-2 text-sm text-steel">
@@ -281,6 +281,13 @@ function outcomeLabel(market: MarketDetail["market"], fairValue: MarketDetail["l
     return `${outcome} win`;
   }
   return outcome;
+}
+
+function marketTypeLabel(marketType: string): string {
+  if (marketType === "h2h_game" || marketType === "h2h") {
+    return "H2H";
+  }
+  return marketType;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

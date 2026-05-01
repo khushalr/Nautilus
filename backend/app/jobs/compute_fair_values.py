@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy import desc, select
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -15,15 +16,16 @@ from app.services.fair_value import (
     EdgeInputs,
     calculate_edge,
     consensus_dispersion,
-    remove_vig_two_way,
     weighted_consensus_fair_probability,
 )
 from app.services.market_classification import effective_prediction_market_type
 from app.services.normalization import (
     EventMatch,
+    extract_h2h_market_info,
     infer_market_league,
     match_prediction_market_to_sportsbook_events,
     normalize_team_name,
+    possible_event_matches,
     slugify,
     team_mention_position,
     team_mention_score,
@@ -62,6 +64,12 @@ class PredictionProbabilityInputs:
     raw_last_price: float | None
     orientation: str
     display_outcome: str | None
+
+
+@dataclass(frozen=True)
+class OutrightSnapshotIndex:
+    grouped_by_event_book: dict[tuple[str, str], list[SportsbookOddsSnapshot]]
+    event_by_id: dict[str, SportsbookEvent]
 
 
 def possible_outright_matches(
@@ -179,10 +187,12 @@ def main() -> None:
     skip_reasons: Counter[str] = Counter()
     market_type_counts: Counter[str] = Counter()
     outright_stats: Counter[str] = Counter()
+    h2h_stats: Counter[str] = Counter()
 
     with SessionLocal() as db:
-        events = list(db.scalars(select(SportsbookEvent)))
         h2h_events = _events_with_market_type(db, {"h2h", "moneyline"})
+        h2h_stats["h2h_sportsbook_events_collected"] = len(h2h_events)
+        outright_index = _build_outright_snapshot_index(_latest_outright_snapshots(db))
         events_by_key: dict[str, list[SportsbookEvent]] = defaultdict(list)
         for event in h2h_events:
             events_by_key[event.normalized_event_key].append(event)
@@ -193,11 +203,11 @@ def main() -> None:
             market_type_counts[effective_market_type] += 1
             if market.market_type != effective_market_type:
                 market.market_type = effective_market_type
-            if effective_market_type not in {"h2h", "futures", "awards"}:
+            if effective_market_type not in {"h2h_game", "futures", "awards"}:
                 _log_skip(
                     skip_reasons,
                     market,
-                    "non_h2h_market_type",
+                    "unsupported_market_type",
                     f"market_type={effective_market_type}",
                 )
                 skipped += 1
@@ -217,6 +227,8 @@ def main() -> None:
                 events_by_key=events_by_key,
                 assumptions=assumptions,
                 stats=outright_stats,
+                h2h_stats=h2h_stats,
+                outright_index=outright_index,
             )
             if probability_result.skip_reason:
                 _log_skip(
@@ -288,6 +300,8 @@ def main() -> None:
 
     logger.info("Computed %s fair values; skipped %s markets", computed, skipped)
     logger.info("Prediction markets checked by market_type: %s", dict(sorted(market_type_counts.items())))
+    if h2h_stats:
+        logger.info("H2H matching stats: %s", dict(sorted(h2h_stats.items())))
     if outright_stats:
         logger.info("Futures/awards matching stats: %s", dict(sorted(outright_stats.items())))
     if skip_reasons:
@@ -362,6 +376,29 @@ def _events_with_market_type(db, market_types: set[str]) -> list[SportsbookEvent
     )
 
 
+def _latest_outright_snapshots(db) -> list[SportsbookOddsSnapshot]:
+    return list(
+        db.scalars(
+            select(SportsbookOddsSnapshot)
+            .where(SportsbookOddsSnapshot.market_type == "outrights")
+            .options(selectinload(SportsbookOddsSnapshot.event))
+            .order_by(desc(SportsbookOddsSnapshot.observed_at))
+            .limit(8000)
+        )
+    )
+
+
+def _build_outright_snapshot_index(snapshots: list[SportsbookOddsSnapshot]) -> OutrightSnapshotIndex:
+    grouped: dict[tuple[str, str], list[SportsbookOddsSnapshot]] = defaultdict(list)
+    event_by_id: dict[str, SportsbookEvent] = {}
+    for snapshot in snapshots:
+        if snapshot.event is None:
+            continue
+        grouped[(snapshot.event_id, snapshot.bookmaker)].append(snapshot)
+        event_by_id[snapshot.event_id] = snapshot.event
+    return OutrightSnapshotIndex(grouped_by_event_book=dict(grouped), event_by_id=event_by_id)
+
+
 def _bookmaker_probabilities_for_market_type(
     *,
     db,
@@ -371,14 +408,17 @@ def _bookmaker_probabilities_for_market_type(
     events_by_key: dict[str, list[SportsbookEvent]],
     assumptions: dict[str, Any],
     stats: Counter[str] | None = None,
+    h2h_stats: Counter[str] | None = None,
+    outright_index: OutrightSnapshotIndex | None = None,
 ) -> BookmakerProbabilityResult:
-    if market_type == "h2h":
+    if market_type in {"h2h", "h2h_game"}:
         return _h2h_bookmaker_probabilities(
             db=db,
             market=market,
             events=events,
             events_by_key=events_by_key,
             assumptions=assumptions,
+            stats=h2h_stats,
         )
     if market_type in {"futures", "awards"}:
         return _outright_bookmaker_probabilities(
@@ -387,6 +427,7 @@ def _bookmaker_probabilities_for_market_type(
             market_type=market_type,
             assumptions=assumptions,
             stats=stats,
+            snapshot_index=outright_index,
         )
     return BookmakerProbabilityResult(
         bookmaker_probabilities=[],
@@ -402,18 +443,36 @@ def _h2h_bookmaker_probabilities(
     events: list[SportsbookEvent],
     events_by_key: dict[str, list[SportsbookEvent]],
     assumptions: dict[str, Any],
+    stats: Counter[str] | None = None,
 ) -> BookmakerProbabilityResult:
-    match = match_prediction_market_to_sportsbook_events(market, events)
+    if stats is not None:
+        stats["h2h_prediction_markets_found"] += 1
+    if not events:
+        return BookmakerProbabilityResult(
+            bookmaker_probabilities=[],
+            skip_reason="no_matching_sportsbook_event",
+            skip_detail="no h2h/moneyline sportsbook events are available",
+        )
+
+    match = match_prediction_market_to_sportsbook_events(market, events, threshold=0.72)
     if match is None:
-        if not market.normalized_event_key:
-            reason = "no_normalized_event_key"
+        scored = possible_event_matches(market, events, limit=1)
+        best = scored[0] if scored else None
+        if best and best.date_score == 0.0:
+            reason = "start_time_too_far"
+        elif best and best.team_score < 0.58:
+            reason = "ambiguous_team_match"
+        elif best and best.confidence_score > 0:
+            reason = "low_match_confidence"
         else:
-            reason = "no_sportsbook_event_with_matching_normalized_event_key"
+            reason = "no_matching_sportsbook_event"
         return BookmakerProbabilityResult(
             bookmaker_probabilities=[],
             skip_reason=reason,
             skip_detail=f"market_key={market.normalized_event_key or '<missing>'}",
         )
+    if stats is not None:
+        stats["h2h_matches_found"] += 1
 
     if market.normalized_event_key not in events_by_key and match.match_type != "exact_normalized_event_key":
         logger.info(
@@ -429,7 +488,7 @@ def _h2h_bookmaker_probabilities(
         return BookmakerProbabilityResult(
             bookmaker_probabilities=[],
             event_match=match,
-            skip_reason="no_sportsbook_odds_exist",
+            skip_reason="no_h2h_odds",
             skip_detail=f"event_id={match.event.id}",
         )
 
@@ -438,9 +497,11 @@ def _h2h_bookmaker_probabilities(
         return BookmakerProbabilityResult(
             bookmaker_probabilities=[],
             event_match=match,
-            skip_reason="outcome_team_could_not_be_identified",
+            skip_reason="ambiguous_team_match",
             skip_detail=f"event_id={match.event.id} event={match.event.event_name}",
         )
+    if stats is not None:
+        stats["h2h_fair_values_computed"] += 1
     return BookmakerProbabilityResult(bookmaker_probabilities=probabilities, event_match=match)
 
 
@@ -473,24 +534,24 @@ def _bookmaker_no_vig_probabilities(
         if selected_line is None or len(latest_by_selection) < 2:
             continue
 
-        selected_key = normalize_team_name(selected_line.selection)
-        opposing_probability = sum(
-            line.implied_probability
-            for key, line in latest_by_selection.items()
-            if key != selected_key
-        )
-        if opposing_probability <= 0:
+        total_probability = sum(line.implied_probability for line in latest_by_selection.values())
+        if total_probability <= 0:
             continue
-
-        no_vig_probability, no_vig_opposing_probability = remove_vig_two_way(
-            selected_line.implied_probability,
-            opposing_probability,
-        )
+        no_vig_probability = selected_line.implied_probability / total_probability
+        no_vig_by_selection = {
+            line.selection: line.implied_probability / total_probability
+            for line in latest_by_selection.values()
+        }
+        opposing_probability = total_probability - selected_line.implied_probability
+        no_vig_opposing_probability = 1 - no_vig_probability
+        h2h_info = _h2h_info_for_match(market, event)
         weight = float(weights.get(bookmaker, 1.0)) if isinstance(weights, dict) else 1.0
         probabilities.append(
             {
                 "bookmaker": bookmaker,
                 "selection": selected_line.selection,
+                "target_outcome": selected_line.selection,
+                "opponent": h2h_info.get("opponent"),
                 "weight": weight,
                 "original_odds": {
                     "american": selected_line.american_odds,
@@ -498,6 +559,8 @@ def _bookmaker_no_vig_probabilities(
                 },
                 "implied_probability": selected_line.implied_probability,
                 "opposing_implied_probability": opposing_probability,
+                "all_no_vig_probabilities": no_vig_by_selection,
+                "h2h_market_total_implied_probability": total_probability,
                 "no_vig_probability": no_vig_probability,
                 "opposing_no_vig_probability": no_vig_opposing_probability,
                 "observed_at": selected_line.observed_at.isoformat(),
@@ -514,7 +577,7 @@ def _prediction_probability_inputs(
 ) -> PredictionProbabilityInputs:
     display_outcome = _target_outcome_from_market(market)
     raw_selection = market.selection.lower().strip()
-    should_complement = market_type in {"futures", "awards"} and raw_selection == "no"
+    should_complement = market_type in {"futures", "awards", "h2h", "h2h_game"} and raw_selection == "no" and display_outcome is not None
 
     if should_complement:
         bid = _complement_probability(snapshot.ask_probability)
@@ -552,20 +615,14 @@ def _outright_bookmaker_probabilities(
     market_type: str,
     assumptions: dict[str, Any],
     stats: Counter[str] | None = None,
+    snapshot_index: OutrightSnapshotIndex | None = None,
 ) -> BookmakerProbabilityResult:
     if stats is not None:
         stats["futures_awards_markets_checked"] += 1
     excluded = {str(bookmaker) for bookmaker in assumptions.get("excluded_bookmakers", [])}
     weights = assumptions.get("bookmaker_weights", {})
-    snapshots = list(
-        db.scalars(
-            select(SportsbookOddsSnapshot)
-            .where(SportsbookOddsSnapshot.market_type == "outrights")
-            .order_by(desc(SportsbookOddsSnapshot.observed_at))
-            .limit(8000)
-        )
-    )
-    if not snapshots:
+    snapshot_index = snapshot_index or _build_outright_snapshot_index(_latest_outright_snapshots(db))
+    if not snapshot_index.grouped_by_event_book:
         return BookmakerProbabilityResult(
             bookmaker_probabilities=[],
             skip_reason="no_sportsbook_outrights_odds_exist",
@@ -585,25 +642,20 @@ def _outright_bookmaker_probabilities(
         )
 
     event_scores: dict[str, float] = {}
-    event_by_id: dict[str, SportsbookEvent] = {}
-    grouped: dict[tuple[str, str], list[SportsbookOddsSnapshot]] = defaultdict(list)
-    for snapshot in snapshots:
-        if snapshot.bookmaker in excluded:
-            continue
-        event = snapshot.event
-        event_by_id[snapshot.event_id] = event
+    for event_id, event in snapshot_index.event_by_id.items():
         event_score = _outright_event_score(market, event, market_type)
         if event_score < 0.45:
             continue
-        grouped[(snapshot.event_id, snapshot.bookmaker)].append(snapshot)
-        event_scores[snapshot.event_id] = max(event_scores.get(snapshot.event_id, 0.0), event_score)
+        event_scores[event_id] = event_score
 
     if stats is not None and event_scores:
         stats["futures_awards_with_matching_sportsbook_category"] += 1
 
     probabilities_by_event: dict[str, list[dict[str, Any]]] = defaultdict(list)
     best_outcome_scores: dict[str, float] = defaultdict(float)
-    for (event_id, bookmaker), book_lines in grouped.items():
+    for (event_id, bookmaker), book_lines in snapshot_index.grouped_by_event_book.items():
+        if event_id not in event_scores or bookmaker in excluded:
+            continue
         latest_by_selection = _latest_lines_by_selection(book_lines)
         selection_key, outcome_score = _selected_outright_key(target, latest_by_selection)
         if selection_key is None or outcome_score < 0.86:
@@ -649,7 +701,7 @@ def _outright_bookmaker_probabilities(
         probabilities_by_event.items(),
         key=lambda item: (len(item[1]), event_scores.get(item[0], 0.0), best_outcome_scores.get(item[0], 0.0)),
     )
-    event = event_by_id[best_event_id]
+    event = snapshot_index.event_by_id[best_event_id]
     match_confidence = min(
         1.0,
         (0.45 * event_scores.get(best_event_id, 0.0))
@@ -697,8 +749,17 @@ def _selected_line_for_market(
     event: SportsbookEvent,
     latest_by_selection: dict[str, SportsbookOddsSnapshot],
 ) -> SportsbookOddsSnapshot | None:
+    target_outcome = _target_outcome_from_market(market)
+    if target_outcome:
+        target_mentions = _strong_line_mentions(target_outcome, latest_by_selection, threshold=0.78)
+        if len(target_mentions) == 1:
+            return target_mentions[0]
+        target_key = normalize_team_name(target_outcome)
+        if target_key in latest_by_selection:
+            return latest_by_selection[target_key]
+
     target_selection = normalize_team_name(market.selection)
-    if target_selection in latest_by_selection:
+    if market.selection.lower().strip() not in {"yes", "no"} and target_selection in latest_by_selection:
         return latest_by_selection[target_selection]
 
     selection_lower = market.selection.lower().strip()
@@ -788,7 +849,7 @@ def _target_outcome_from_market(market: Market) -> str | None:
 
     title = market.event_name.strip()
     lower_title = title.lower()
-    for delimiter in (" win ", " make ", " reach "):
+    for delimiter in (" beat ", " beats ", " defeat ", " defeats ", " win ", " make ", " reach "):
         marker = f"will "
         if lower_title.startswith(marker) and delimiter in lower_title:
             start = len(marker)
@@ -799,6 +860,27 @@ def _target_outcome_from_market(market: Market) -> str | None:
                 return candidate
 
     return None
+
+
+def _h2h_info_for_match(market: Market, event: SportsbookEvent) -> dict[str, str | None]:
+    info = extract_h2h_market_info(market.event_name, market.selection)
+    target = info.target_team
+    opponent = info.opponent_team
+    event_teams = [
+        team
+        for team in (event.home_team, event.away_team)
+        if team
+    ]
+    if target:
+        target = next(
+            (team for team in event_teams if normalize_team_name(team) == target),
+            target,
+        )
+        opponent = next(
+            (team for team in event_teams if normalize_team_name(team) != normalize_team_name(target)),
+            opponent,
+        )
+    return {"target_team": target, "opponent": opponent}
 
 
 def _selected_outright_key(
@@ -978,12 +1060,17 @@ def _build_explanation_json(
     prediction_inputs: PredictionProbabilityInputs,
     edge,
 ) -> dict[str, Any]:
+    h2h_info = _h2h_info_for_match(market, event_match.event) if getattr(event_match.event, "home_team", None) or getattr(event_match.event, "away_team", None) else {}
     return {
         "selected_bookmakers": [book["bookmaker"] for book in bookmaker_probabilities],
         "bookmakers": bookmaker_probabilities,
         "matched_event": {
             "event_id": getattr(event_match.event, "id", None),
             "event_name": getattr(event_match.event, "event_name", None),
+            "home_team": getattr(event_match.event, "home_team", None),
+            "away_team": getattr(event_match.event, "away_team", None),
+            "target_team": h2h_info.get("target_team"),
+            "opponent": h2h_info.get("opponent"),
             "normalized_event_key": event_match.normalized_event_key,
             "confidence_score": event_match.confidence_score,
             "league_score": event_match.league_score,

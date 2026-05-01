@@ -33,6 +33,18 @@ run_and_capture() {
   return $exit_code
 }
 
+backend_exec() {
+  args=(docker compose exec -T)
+  if [ -n "${SPORTS_TO_COLLECT:-}" ]; then
+    args+=(-e "SPORTS_TO_COLLECT=${SPORTS_TO_COLLECT}")
+  fi
+  if [ -n "${SPORTSBOOK_MARKETS_TO_COLLECT:-}" ]; then
+    args+=(-e "SPORTSBOOK_MARKETS_TO_COLLECT=${SPORTSBOOK_MARKETS_TO_COLLECT}")
+  fi
+  args+=(backend "$@")
+  "${args[@]}"
+}
+
 extract_prediction_count() {
   printf "%s" "$1" | sed -nE 's/.*Stored ([0-9]+) prediction-market snapshots.*/\1/p' | tail -1
 }
@@ -66,12 +78,12 @@ while true; do
   echo "Nautilus cycle started at ${cycle_started}"
   echo "=============================="
 
-  run_and_capture "prediction markets" docker compose exec -T backend python -m app.jobs.collect_prediction_markets
+  run_and_capture "prediction markets" backend_exec python -m app.jobs.collect_prediction_markets
   prediction_count=$(extract_prediction_count "$RUN_OUTPUT")
   prediction_summary="${prediction_count:-unknown} snapshots"
 
   if [ $((now - last_sportsbook_run)) -ge "$SPORTSBOOK_INTERVAL_SECONDS" ]; then
-    if run_and_capture "sportsbook odds" docker compose exec -T backend python -m app.jobs.collect_sportsbook_odds; then
+    if run_and_capture "sportsbook odds" backend_exec python -m app.jobs.collect_sportsbook_odds; then
       if is_quota_failure "$RUN_OUTPUT"; then
         sportsbook_summary="quota unavailable; using latest stored sportsbook odds"
         echo "Sportsbook odds unavailable/quota exhausted; using latest stored sportsbook odds for fair-value computation."
@@ -96,7 +108,7 @@ while true; do
     echo "Sportsbook odds unavailable/quota exhausted; using latest stored sportsbook odds for fair-value computation."
   fi
 
-  run_and_capture "fair values" docker compose exec -T backend python -m app.jobs.compute_fair_values
+  run_and_capture "fair values" backend_exec python -m app.jobs.compute_fair_values
   fair_value_count=$(extract_fair_value_count "$RUN_OUTPUT")
   fair_value_summary="${fair_value_count:-unknown} computed"
 

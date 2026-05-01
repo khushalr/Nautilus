@@ -12,7 +12,7 @@ from app.services.collectors.base import CollectionResult, CollectorAdapter, Per
 from app.services.collectors.persistence import persist_prediction_market_quotes
 from app.services.fair_value import calculate_market_midpoint
 from app.services.market_classification import classify_prediction_market, market_priority
-from app.services.normalization import normalized_event_key_from_name, slugify
+from app.services.normalization import infer_league_from_text, normalized_event_key_from_name, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,14 @@ def _is_sports_market(item: dict[str, Any]) -> bool:
 
 
 def _category(item: dict[str, Any]) -> str | None:
+    title_text = " ".join(
+        str(item.get(key) or "")
+        for key in ("question", "title", "description", "market_slug", "slug")
+    )
+    inferred = infer_league_from_text(title_text)
+    if inferred:
+        return inferred.upper()
+
     category = item.get("category")
     if isinstance(category, str) and category and category.lower() not in {"sport", "sports"}:
         return category

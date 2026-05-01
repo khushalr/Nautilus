@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -11,7 +12,7 @@ from app.core.config import Settings, get_settings
 from app.services.collectors.base import CollectionResult, CollectorAdapter, PersistResult, SportsbookEventRecord, SportsbookLine
 from app.services.collectors.persistence import persist_sportsbook_result
 from app.services.fair_value import american_to_probability, decimal_to_probability
-from app.services.normalization import normalized_event_key
+from app.services.normalization import infer_league_from_text, normalized_event_key
 from app.services.odds_quota import (
     maybe_notify_low_quota,
     notify_quota_failure,
@@ -20,6 +21,13 @@ from app.services.odds_quota import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class OddsApiRequestPlan:
+    sport: str
+    markets: tuple[str, ...]
+    fetch_events: bool
 
 
 class OddsApiCollector(CollectorAdapter):
@@ -42,20 +50,27 @@ class OddsApiCollector(CollectorAdapter):
 
         async with httpx.AsyncClient(base_url=str(self.settings.odds_api_url), timeout=25) as client:
             sport_metadata = await self._sport_metadata(client)
-            sports_to_collect = _expand_with_related_outright_sports(self.sports, sport_metadata)
-            if sports_to_collect != self.sports:
-                logger.info("Expanded sportsbook sports for related outrights: %s", sports_to_collect)
-            for sport in sports_to_collect:
+            request_plan = _collection_plan(self.sports, self.markets, sport_metadata)
+            logger.info("SPORTS_TO_COLLECT=%s", self.sports)
+            logger.info("SPORTSBOOK_MARKETS_TO_COLLECT=%s", self.markets)
+            logger.info(
+                "Effective sportsbook markets being requested: %s",
+                [
+                    {"sport": plan.sport, "markets": list(plan.markets), "fetch_events": plan.fetch_events}
+                    for plan in request_plan
+                ],
+            )
+            for plan in request_plan:
                 try:
                     sport_events, sport_lines = await self._collect_sport(
                         client,
-                        sport,
-                        sport_metadata.get(sport),
-                        outrights_only=sport not in self.sports,
+                        plan.sport,
+                        plan.markets,
+                        fetch_events=plan.fetch_events,
                     )
                 except httpx.HTTPError as exc:
-                    logger.warning("The Odds API collection failed for %s: %s", sport, redact_api_key(str(exc)))
-                    failures.append(f"{sport}: {exc}")
+                    logger.warning("The Odds API collection failed for %s: %s", plan.sport, redact_api_key(str(exc)))
+                    failures.append(f"{plan.sport}: {exc}")
                     continue
                 events.extend(sport_events)
                 lines.extend(sport_lines)
@@ -88,10 +103,10 @@ class OddsApiCollector(CollectorAdapter):
         self,
         client: httpx.AsyncClient,
         sport: str,
-        sport_metadata: dict[str, Any] | None,
-        outrights_only: bool = False,
+        markets: tuple[str, ...],
+        *,
+        fetch_events: bool,
     ) -> tuple[list[SportsbookEventRecord], list[SportsbookLine]]:
-        markets = _markets_for_sport(self.markets, sport_metadata, outrights_only=outrights_only)
         if not markets:
             logger.info("Skipping %s odds collection: no supported sportsbook markets configured", sport)
             return [], []
@@ -105,19 +120,20 @@ class OddsApiCollector(CollectorAdapter):
             "dateFormat": "iso",
         }
         event_lookup: dict[str, dict[str, Any]] = {}
-        try:
-            events_response = await client.get(f"/sports/{sport}/events", params=event_params)
-            self._log_and_notify_quota(events_response, f"{sport}/events")
-            self._raise_for_quota(events_response, f"{sport}/events")
-            events_response.raise_for_status()
-            event_payload = events_response.json()
-            event_lookup = {
-                str(event.get("id")): event
-                for event in event_payload
-                if isinstance(event, dict) and event.get("id") is not None
-            } if isinstance(event_payload, list) else {}
-        except httpx.HTTPError as exc:
-            logger.info("The Odds API events endpoint unavailable for %s; continuing with odds payload only: %s", sport, redact_api_key(str(exc)))
+        if fetch_events:
+            try:
+                events_response = await client.get(f"/sports/{sport}/events", params=event_params)
+                self._log_and_notify_quota(events_response, f"{sport}/events")
+                self._raise_for_quota(events_response, f"{sport}/events")
+                events_response.raise_for_status()
+                event_payload = events_response.json()
+                event_lookup = {
+                    str(event.get("id")): event
+                    for event in event_payload
+                    if isinstance(event, dict) and event.get("id") is not None
+                } if isinstance(event_payload, list) else {}
+            except httpx.HTTPError as exc:
+                logger.info("The Odds API events endpoint unavailable for %s; continuing with odds payload only: %s", sport, redact_api_key(str(exc)))
         odds_response = await client.get(f"/sports/{sport}/odds", params=odds_params)
         self._log_and_notify_quota(odds_response, f"{sport}/odds")
         self._raise_for_quota(odds_response, f"{sport}/odds")
@@ -236,8 +252,9 @@ def _event_record_from_payload(
     home_team = _as_str(event.get("home_team") or (events_endpoint_payload or {}).get("home_team"))
     away_team = _as_str(event.get("away_team") or (events_endpoint_payload or {}).get("away_team"))
     start_time = _parse_datetime(event.get("commence_time") or (events_endpoint_payload or {}).get("commence_time"))
-    league = _as_str(event.get("sport_title") or (events_endpoint_payload or {}).get("sport_title") or sport)
-    event_name = f"{away_team} at {home_team}" if home_team and away_team else str(league or event.get("id"))
+    sport_title = _as_str(event.get("sport_title") or (events_endpoint_payload or {}).get("sport_title") or sport)
+    league = _league_from_sport_key(sport) or _league_from_text(sport_title) or sport_title
+    event_name = f"{away_team} at {home_team}" if home_team and away_team else str(sport_title or league or event.get("id"))
     event_key = (
         normalized_event_key(league, [home_team or "", away_team or ""], start_time)
         if home_team and away_team
@@ -258,6 +275,15 @@ def _event_record_from_payload(
             "odds_endpoint": event,
         },
     )
+
+
+def _league_from_sport_key(sport: str) -> str | None:
+    return _league_from_text(sport.replace("_", " "))
+
+
+def _league_from_text(value: str | None) -> str | None:
+    inferred = infer_league_from_text(str(value or ""))
+    return inferred.upper() if inferred else None
 
 
 def _parse_datetime(value: object) -> datetime | None:
@@ -344,6 +370,43 @@ def _markets_for_sport(
     return requested
 
 
+def _collection_plan(
+    configured_sports: list[str],
+    configured_markets: list[str],
+    sport_metadata: dict[str, dict[str, Any]],
+) -> list[OddsApiRequestPlan]:
+    requested = [market for market in configured_markets if market in {"h2h", "outrights"}]
+    plans: list[OddsApiRequestPlan] = []
+    if "h2h" in requested:
+        for sport in configured_sports:
+            if _looks_like_outright_sport_key(sport):
+                continue
+            plans.append(OddsApiRequestPlan(sport=sport, markets=("h2h",), fetch_events=True))
+
+    if "outrights" in requested:
+        outright_sports = _expand_with_related_outright_sports(configured_sports, sport_metadata)
+        for sport in outright_sports:
+            metadata = sport_metadata.get(sport)
+            if metadata and metadata.get("has_outrights") is False:
+                logger.info(
+                    "Skipping outrights for %s: The Odds API sport metadata has has_outrights=false",
+                    metadata.get("key") or metadata.get("title") or sport,
+                )
+                continue
+            if sport in configured_sports and not _looks_like_outright_sport_key(sport) and not (metadata or {}).get("has_outrights"):
+                continue
+            plans.append(OddsApiRequestPlan(sport=sport, markets=("outrights",), fetch_events=False))
+
+    deduped: list[OddsApiRequestPlan] = []
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for plan in plans:
+        key = (plan.sport, plan.markets)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(plan)
+    return deduped
+
+
 def _expand_with_related_outright_sports(
     configured_sports: list[str],
     sport_metadata: dict[str, dict[str, Any]],
@@ -362,3 +425,19 @@ def _expand_with_related_outright_sports(
             if sport_key.startswith(f"{configured_prefix}_"):
                 expanded.append(sport_key)
     return expanded
+
+
+def _looks_like_outright_sport_key(sport_key: str) -> bool:
+    slug = sport_key.lower()
+    return any(
+        token in slug
+        for token in (
+            "championship_winner",
+            "conference_winner",
+            "division_winner",
+            "winner",
+            "mvp",
+            "award",
+            "cup_winner",
+        )
+    )

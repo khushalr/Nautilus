@@ -63,7 +63,7 @@ Optional data-source settings:
 - `KALSHI_API_SECRET`
 - `THE_ODDS_API_KEY`
 - `SPORTS_TO_COLLECT`, a comma-separated list such as `americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl`.
-- `SPORTSBOOK_MARKETS_TO_COLLECT`, a comma-separated list of sportsbook market keys. Defaults to `h2h,outrights`. When `outrights` is enabled, Nautilus expands configured base sports with related active outright sport keys advertised by The Odds API, such as championship-winner markets, when available.
+- `SPORTSBOOK_MARKETS_TO_COLLECT`, a comma-separated list of sportsbook market keys. Defaults to `h2h,outrights`. Use `outrights` for futures/awards only, `h2h` for game moneylines only, or `h2h,outrights` for both. Nautilus keeps H2H and outright Odds API requests separate so it does not ask for invalid market combinations.
 - `POLYMARKET_API_URL`
 - `KALSHI_API_URL`
 - `THE_ODDS_API_URL`
@@ -113,8 +113,13 @@ docker compose exec backend python -m app.jobs.collect_sportsbook_odds
 # Limit sportsbook collection to selected sports.
 docker compose exec -e SPORTS_TO_COLLECT=americanfootball_nfl,basketball_nba backend python -m app.jobs.collect_sportsbook_odds
 
-# Limit sportsbook market collection to h2h only or request outrights explicitly.
+# Collect sportsbook futures/outrights only. This does not request H2H events or H2H odds.
+docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=outrights backend python -m app.jobs.collect_sportsbook_odds
+
+# Collect H2H/moneyline game odds only. This does not request sportsbook outrights.
 docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=h2h backend python -m app.jobs.collect_sportsbook_odds
+
+# Collect both. Nautilus requests base sport H2H odds and outright sport-key odds separately.
 docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=h2h,outrights backend python -m app.jobs.collect_sportsbook_odds
 
 # Compute fair values after snapshots are collected.
@@ -161,13 +166,13 @@ Nautilus compares prediction-market prices with sportsbook-derived fair probabil
 
 Supported fair-value routes:
 
-- `h2h`: prediction-market H2H/game markets compared against sportsbook H2H moneyline odds.
+- `h2h_game`: prediction-market H2H/game markets compared against sportsbook H2H moneyline odds.
 - `futures`: team/championship/conference/division-style prediction markets compared against sportsbook `outrights` odds when The Odds API returns matching outcomes.
 - `awards`: player award markets compared against sportsbook `outrights` odds when The Odds API returns matching award outcomes.
 
 The scanner and detail UI use this same orientation:
 
-- H2H rows show the selected team/outcome probability.
+- H2H rows show the target team's YES/winning probability.
 - Futures/awards/outrights rows show `Market YES` for the named team/player/outcome winning.
 - `Sportsbook Fair` is the no-vig sportsbook probability for that same winning outcome.
 - Raw YES/NO contract side and provider payloads remain available only in detail/debug views.
@@ -192,8 +197,8 @@ Limitations:
 
 Current and future market modes:
 
-- Current Nautilus mode is futures/outrights research.
-- Future H2H/live-game mode would match prediction-market game contracts to sportsbook H2H/moneyline odds. That requires game-level prediction markets, team extraction, start-time matching, and faster odds polling.
+- Current Nautilus mode supports futures/outrights research and H2H game-market research when matching prediction-market game contracts exist.
+- Future live-game expansion should use the same H2H route, with faster sportsbook polling only when game-level markets, team extraction, start-time matching, and quota capacity justify it.
 
 ## Odds API Quota Monitoring
 

@@ -14,6 +14,7 @@ from app.models import Market, PredictionMarketSnapshot, SportsbookEvent, Sports
 from app.services.collectors.base import CollectionResult, PredictionMarketQuote, SportsbookEventRecord, SportsbookLine
 from app.services.collectors.odds_api import (
     OddsApiCollector,
+    _collection_plan,
     _expand_with_related_outright_sports,
     _markets_for_sport,
     _odds_values_from_price,
@@ -106,6 +107,44 @@ def test_odds_api_outrights_market_support_uses_sport_metadata() -> None:
         {"key": "basketball_nba_championship_winner", "has_outrights": True},
         outrights_only=True,
     ) == ["outrights"]
+
+
+def test_sportsbook_markets_outrights_mode_does_not_request_h2h() -> None:
+    plan = _collection_plan(
+        ["basketball_nba"],
+        ["outrights"],
+        {
+            "basketball_nba": {"key": "basketball_nba", "active": True, "has_outrights": False},
+            "basketball_nba_championship_winner": {
+                "key": "basketball_nba_championship_winner",
+                "active": True,
+                "has_outrights": True,
+            },
+        },
+    )
+
+    assert [(item.sport, item.markets, item.fetch_events) for item in plan] == [
+        ("basketball_nba_championship_winner", ("outrights",), False)
+    ]
+
+
+def test_sportsbook_markets_h2h_mode_does_not_request_outrights() -> None:
+    plan = _collection_plan(
+        ["basketball_nba"],
+        ["h2h"],
+        {
+            "basketball_nba": {"key": "basketball_nba", "active": True, "has_outrights": False},
+            "basketball_nba_championship_winner": {
+                "key": "basketball_nba_championship_winner",
+                "active": True,
+                "has_outrights": True,
+            },
+        },
+    )
+
+    assert [(item.sport, item.markets, item.fetch_events) for item in plan] == [
+        ("basketball_nba", ("h2h",), True)
+    ]
 
 
 def test_odds_api_expands_configured_sports_with_related_outrights() -> None:
@@ -260,7 +299,7 @@ def test_polymarket_classifies_h2h_and_futures() -> None:
         "polymarket",
     )
 
-    assert {quote.market_type for quote in h2h_quotes} == {"h2h"}
+    assert {quote.market_type for quote in h2h_quotes} == {"h2h_game"}
     assert {quote.market_type for quote in futures_quotes} == {"futures"}
 
 
@@ -276,7 +315,7 @@ def test_market_classification_identifies_awards_and_legacy_binary() -> None:
         extra={},
     )
 
-    assert effective_prediction_market_type(legacy_market) == "h2h"
+    assert effective_prediction_market_type(legacy_market) == "h2h_game"
 
 
 def test_odds_api_missing_key_fails_gracefully() -> None:

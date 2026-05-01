@@ -90,11 +90,16 @@ class Settings(BaseSettings):
 
     @property
     def sportsbook_markets_to_collect(self) -> list[str]:
-        return [
-            market.strip()
+        aliases = {"moneyline": "h2h", "h2h_game": "h2h"}
+        markets: list[str] = []
+        for market in [
+            aliases.get(market.strip().lower(), market.strip().lower())
             for market in self.sportsbook_markets_to_collect_raw.split(",")
             if market.strip()
-        ]
+        ]:
+            if market in {"h2h", "outrights"} and market not in markets:
+                markets.append(market)
+        return markets
 
 
 @lru_cache

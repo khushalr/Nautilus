@@ -15,6 +15,7 @@ from app.models import (
     SportsbookOddsSnapshot,
     UserModel,
 )
+from app.services.normalization import infer_market_league, normalize_team_name, slugify
 from app.schemas import (
     AlertRuleCreate,
     AlertRuleOut,
@@ -165,15 +166,16 @@ def list_opportunities(
             )
         )
         .order_by(FairValueSnapshot.net_edge.desc(), FairValueSnapshot.confidence_score.desc())
-        .limit(limit)
+        .limit(min(limit * 4, 500))
     )
     if league:
         stmt = stmt.where(Market.league == league)
 
-    return [
+    rows = [
         _opportunity_scanner_row(market, fair_value, include_debug=include_debug, include_raw=include_raw)
         for market, fair_value in db.execute(stmt).all()
     ]
+    return _dedupe_scanner_rows(rows)[:limit]
 
 
 @router.get("/opportunities/{market_id}", response_model=MarketDetailOut)
@@ -275,8 +277,8 @@ def _opportunity_scanner_row(
         title=market.event_name,
         source=market.source,
         external_id=market.external_id,
-        league=market.league,
-        market_type=market.market_type,
+        league=_display_league(market, matched_event),
+        market_type=_display_market_type(market.market_type),
         outcome=display_outcome,
         display_outcome=display_outcome,
         start_time=market.start_time,
@@ -301,6 +303,62 @@ def _opportunity_scanner_row(
     if include_raw:
         payload.market_extra = market.extra
     return payload
+
+
+def _dedupe_scanner_rows(rows: list[OpportunityScannerOut]) -> list[OpportunityScannerOut]:
+    deduped: dict[str, OpportunityScannerOut] = {}
+    for row in rows:
+        key = _canonical_opportunity_key(row)
+        current = deduped.get(key)
+        if current is None or _row_rank(row) > _row_rank(current):
+            deduped[key] = row
+    return sorted(
+        deduped.values(),
+        key=lambda row: (row.net_edge, row.confidence_score, row.last_updated),
+        reverse=True,
+    )
+
+
+def _row_rank(row: OpportunityScannerOut) -> tuple[float, float, object]:
+    return (row.net_edge, row.confidence_score, row.last_updated)
+
+
+def _canonical_opportunity_key(row: OpportunityScannerOut) -> str:
+    market_type = _display_market_type(row.market_type)
+    outcome = normalize_team_name(row.display_outcome or row.outcome or row.matched_selection or row.title)
+    if market_type == "h2h_game":
+        matched = row.matched_sportsbook_category or row.title
+        start_date = row.start_time.date().isoformat() if row.start_time else "unknown-date"
+        return "|".join(
+            (
+                row.source,
+                market_type,
+                slugify(row.league or "unknown"),
+                outcome,
+                slugify(matched),
+                start_date,
+            )
+        )
+    category = row.matched_sportsbook_category or row.title
+    return "|".join((row.source, market_type, slugify(category), outcome))
+
+
+def _display_market_type(market_type: str | None) -> str:
+    return "h2h_game" if market_type == "h2h" else str(market_type or "other")
+
+
+def _display_league(market: Market, matched_event: dict) -> str | None:
+    explicit = market.league
+    if explicit and slugify(explicit) not in {"sports", "sport", "unknown-league"}:
+        return explicit.upper() if explicit.lower() in {"nba", "nfl", "mlb", "nhl"} else explicit
+    inferred = infer_market_league(market)
+    if inferred and inferred not in {"sports", "sport", "unknown-league"}:
+        return inferred.upper()
+    event_name = _string_or_none(matched_event.get("event_name"))
+    event_league = infer_market_league(type("MatchedEventText", (), {"event_name": event_name or "", "selection": "", "league": ""})())
+    if event_league and event_league not in {"sports", "sport", "unknown-league"}:
+        return event_league.upper()
+    return explicit
 
 
 def _string_or_none(value: object) -> str | None:

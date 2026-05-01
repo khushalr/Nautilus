@@ -59,7 +59,10 @@ export function ScannerTable({ opportunities }: { opportunities: Opportunity[] }
                   </td>
                   <td className="px-4 py-4 text-steel">{opportunity.league ?? "Unknown"}</td>
                   <td className="px-4 py-4 text-steel">{formatDateTime(opportunity.start_time)}</td>
-                  <td className="px-4 py-4 text-steel">{sourceLabel(opportunity.source)}</td>
+                  <td className="px-4 py-4 text-steel">
+                    <div>{sourceLabel(opportunity.source)}</div>
+                    <div className="mt-1 text-xs uppercase tracking-[0.12em] text-steel/80">{marketTypeLabel(opportunity.market_type)}</div>
+                  </td>
                   <td className="px-4 py-4 text-right font-mono">{formatPercent(opportunity.market_probability)}</td>
                   <td className="px-4 py-4 text-right font-mono text-white">{formatPercent(opportunity.fair_probability)}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatSignedPercent(opportunity.gross_edge)}</td>
@@ -109,4 +112,11 @@ function outcomeLabel(opportunity: Opportunity): string {
     return `${outcome} win`;
   }
   return outcome;
+}
+
+function marketTypeLabel(marketType: string): string {
+  if (marketType === "h2h_game" || marketType === "h2h") {
+    return "H2H";
+  }
+  return marketType;
 }

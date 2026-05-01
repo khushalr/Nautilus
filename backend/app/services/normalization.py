@@ -188,6 +188,31 @@ LEAGUE_KEYWORDS: tuple[tuple[str, str], ...] = (
 )
 
 
+TEAM_LEAGUES: dict[str, str] = {
+    **{code: "nfl" for code in (
+        "ari", "atl", "bal", "buf", "car", "chi", "dal", "den", "det", "gb", "kc", "lv", "lac",
+        "lar", "mia", "ne", "nyg", "nyj", "phi", "pit", "sf", "sea", "tb", "ten", "was",
+    )},
+    **{code: "nba" for code in (
+        "bos", "nyk", "lal", "gsw", "atl-hawks", "bkn", "cha", "cle", "dal-mavs", "den-nuggets",
+        "hou", "ind", "lac-clippers", "mem", "mia-heat", "mil", "min", "nop", "okc", "orl",
+        "phx", "por", "sac", "sas", "tor-raptors", "uta", "wsh",
+    )},
+    **{code: "mlb" for code in (
+        "lad", "sd", "nyy", "tor", "ari-dbacks", "atl-braves", "bal-orioles", "bos-red-sox",
+        "chc", "chw", "cin", "cle-guardians", "col", "det-tigers", "hou-astros", "kc-royals",
+        "laa", "mia-marlins", "mil-brewers", "min-twins", "nym", "oak", "phi-phillies",
+        "pit-pirates", "sf-giants", "sea-mariners", "stl", "tb-rays", "tex", "wsh-nationals",
+    )},
+    **{code: "nhl" for code in (
+        "ana", "bos-bruins", "buf-sabres", "cgy", "car-hurricanes", "chi-blackhawks", "col-avs",
+        "cbj", "dal-stars", "det-red-wings", "edm", "fla", "la-kings", "min-wild", "mtl",
+        "nsh", "njd", "nyi", "nyr", "ott", "phi-flyers", "pit-penguins", "sj", "sea-kraken",
+        "stl-blues", "tbl", "tor-leafs", "van", "vgk", "wsh-capitals", "wpg",
+    )},
+}
+
+
 @dataclass(frozen=True)
 class EventMatch:
     event: object
@@ -200,6 +225,14 @@ class EventMatch:
     match_type: str = "fuzzy"
     reason: str = ""
     inferred_market_normalized_event_key: str | None = None
+
+
+@dataclass(frozen=True)
+class H2HMarketInfo:
+    target_team: str | None
+    opponent_team: str | None
+    participants: tuple[str, ...]
+    market_side: str | None = None
 
 
 def slugify(value: str) -> str:
@@ -383,7 +416,45 @@ def infer_league_from_text(text: str) -> str | None:
     for keyword, league in LEAGUE_KEYWORDS:
         if re.search(rf"\b{re.escape(keyword)}\b", searchable):
             return league
+    mentioned_leagues = {
+        TEAM_LEAGUES[canonical]
+        for canonical in _team_aliases_in_text(text)
+        if canonical in TEAM_LEAGUES
+    }
+    if len(mentioned_leagues) == 1:
+        return next(iter(mentioned_leagues))
     return None
+
+
+def extract_h2h_market_info(title: str, selection: str | None = None) -> H2HMarketInfo:
+    mentions = _team_alias_mentions(title)
+    participants = tuple(canonical for _position, _alias, canonical in mentions)
+    raw_selection = str(selection or "").strip()
+    selection_key = normalize_team_name(raw_selection) if raw_selection and raw_selection.lower() not in {"yes", "no"} else None
+
+    target: str | None = None
+    if selection_key and selection_key in participants:
+        target = selection_key
+    elif selection_key:
+        target = selection_key
+    elif mentions and _looks_like_target_first_h2h_title(title):
+        target = mentions[0][2]
+
+    opponent: str | None = None
+    if target:
+        opponents = [team for team in participants if team != target]
+        if opponents:
+            opponent = opponents[0]
+    elif len(participants) >= 2:
+        target = participants[0]
+        opponent = participants[1]
+
+    return H2HMarketInfo(
+        target_team=target,
+        opponent_team=opponent,
+        participants=participants,
+        market_side=raw_selection or None,
+    )
 
 
 def team_mention_score(text: str, team_name: str | None) -> float:
@@ -449,16 +520,37 @@ def _participants_from_market(prediction_market: object) -> list[str]:
 
 
 def _team_aliases_in_text(text: str) -> list[str]:
+    return [canonical for _position, _alias, canonical in _team_alias_mentions(text)]
+
+
+def _team_alias_mentions(text: str) -> list[tuple[int, str, str]]:
     text_lower = text.lower()
-    matches: list[str] = []
+    matches: list[tuple[int, str, str]] = []
     seen: set[str] = set()
     for alias, canonical in sorted(TEAM_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
         if canonical in seen:
             continue
-        if re.search(rf"\b{re.escape(alias)}\b", text_lower):
-            matches.append(canonical)
+        match = re.search(rf"\b{re.escape(alias)}\b", text_lower)
+        if match:
+            matches.append((match.start(), alias, canonical))
             seen.add(canonical)
+    matches.sort(key=lambda item: item[0])
     return matches
+
+
+def _looks_like_target_first_h2h_title(title: str) -> bool:
+    slug = f" {slugify(title).replace('-', ' ')} "
+    return any(
+        phrase in slug
+        for phrase in (
+            " will ",
+            " beat ",
+            " beats ",
+            " defeat ",
+            " defeats ",
+            " win against ",
+        )
+    )
 
 
 def _participants_from_sportsbook_event(sportsbook_event: object) -> list[str]:

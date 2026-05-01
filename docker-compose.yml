@@ -24,8 +24,8 @@ services:
       POLYMARKET_API_URL: https://gamma-api.polymarket.com
       KALSHI_API_URL: https://trading-api.kalshi.com/trade-api/v2
       THE_ODDS_API_URL: https://api.the-odds-api.com/v4
-      SPORTS_TO_COLLECT: americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl
-      SPORTSBOOK_MARKETS_TO_COLLECT: h2h,outrights
+      SPORTS_TO_COLLECT: ${SPORTS_TO_COLLECT:-americanfootball_nfl,basketball_nba,baseball_mlb,icehockey_nhl}
+      SPORTSBOOK_MARKETS_TO_COLLECT: ${SPORTSBOOK_MARKETS_TO_COLLECT:-h2h,outrights}
     env_file:
       - .env
     ports:

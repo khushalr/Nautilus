@@ -7,7 +7,7 @@ from typing import Any
 
 from app.services.normalization import TEAM_ALIASES, parse_event_participants
 
-PREDICTION_MARKET_TYPES = {"h2h", "futures", "awards", "totals", "spread", "other"}
+PREDICTION_MARKET_TYPES = {"h2h", "h2h_game", "futures", "awards", "totals", "spread", "other"}
 
 FUTURES_TERMS = (
     "win the championship",
@@ -94,12 +94,13 @@ def classify_prediction_market(
     if _contains_any(text, SPREAD_TERMS):
         return "spread"
     if _looks_like_h2h(title, selection, start_time, raw_payload):
-        return "h2h"
+        return "h2h_game"
     return "other"
 
 
 def market_priority(market_type: str, start_time: datetime | None = None) -> tuple[int, int]:
     type_priority = {
+        "h2h_game": 0,
         "h2h": 0,
         "totals": 1,
         "spread": 2,
@@ -112,11 +113,13 @@ def market_priority(market_type: str, start_time: datetime | None = None) -> tup
 
 
 def should_compute_h2h_fair_value(market_type: str | None) -> bool:
-    return market_type == "h2h"
+    return market_type in {"h2h", "h2h_game"}
 
 
 def effective_prediction_market_type(market: object) -> str:
     stored_type = str(getattr(market, "market_type", "") or "").lower()
+    if stored_type == "h2h":
+        return "h2h_game"
     if stored_type in PREDICTION_MARKET_TYPES:
         return stored_type
     return classify_prediction_market(
