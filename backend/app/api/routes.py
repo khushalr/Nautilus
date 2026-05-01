@@ -428,6 +428,23 @@ def _signal_result_rows(db: Session, market_id: str | None = None, limit: int | 
         stmt = stmt.limit(limit)
     rows: list[dict] = []
     for signal, result in db.execute(stmt).all():
+        signal_payload = signal.raw_payload if isinstance(signal.raw_payload, dict) else {}
+        result_payload = result.raw_payload if isinstance(result.raw_payload, dict) else {}
+        evaluation_status = result_payload.get("evaluation_status") or _evaluation_status(result)
+        raw_outcome_side = signal_payload.get("raw_outcome_side") or signal_payload.get("raw_prediction_side")
+        raw_historical_price = _float_or_none(signal_payload.get("raw_historical_price", signal_payload.get("historical_price")))
+        derived_yes_probability = _derived_yes_from_payload(raw_outcome_side, raw_historical_price, signal.entry_market_yes_probability)
+        suspicion_reason = _suspicion_reason(signal, signal_payload)
+        invalid_entry_probability = not (
+            _probability_in_range(signal.entry_market_yes_probability)
+            and _probability_in_range(signal.entry_sportsbook_fair_probability)
+            and -1 <= signal.entry_net_edge <= 1
+        )
+        if suspicion_reason:
+            evaluation_status = "suspicious_probability_orientation"
+        elif invalid_entry_probability:
+            evaluation_status = "invalid_probability"
+        signal_category = _signal_category(signal.direction, evaluation_status, result.paper_pnl_per_contract)
         rows.append(
             {
                 "signal_id": signal.id,
@@ -440,7 +457,7 @@ def _signal_result_rows(db: Session, market_id: str | None = None, limit: int | 
                 "direction": signal.direction,
                 "entry_market_yes_probability": signal.entry_market_yes_probability,
                 "entry_sportsbook_fair_probability": signal.entry_sportsbook_fair_probability,
-                "entry_net_edge": signal.entry_net_edge,
+                "entry_net_edge": None if invalid_entry_probability or suspicion_reason else signal.entry_net_edge,
                 "confidence_score": signal.confidence_score,
                 "horizon": result.horizon,
                 "exit_market_yes_probability": result.exit_market_yes_probability,
@@ -448,7 +465,19 @@ def _signal_result_rows(db: Session, market_id: str | None = None, limit: int | 
                 "return_on_stake": result.return_on_stake,
                 "did_edge_close": result.did_edge_close,
                 "moved_expected_direction": result.moved_expected_direction,
-                "skip_reason": result.skip_reason,
+                "skip_reason": (
+                    "suspicious_probability_orientation"
+                    if suspicion_reason
+                    else ("invalid_probability_range" if invalid_entry_probability else result.skip_reason)
+                ),
+                "evaluation_status": evaluation_status,
+                "signal_category": signal_category,
+                "raw_outcome_side": raw_outcome_side,
+                "raw_historical_price": raw_historical_price,
+                "derived_market_yes_probability": derived_yes_probability,
+                "suspicion_reason": suspicion_reason,
+                "liquidity_status": signal_payload.get("liquidity_status"),
+                "liquidity_adjusted": signal_payload.get("liquidity_adjusted"),
             }
         )
     return rows
@@ -466,18 +495,57 @@ def _bucket_rows(rows: list[dict], key_fn) -> list[SignalPerformanceBucket]:
 
 
 def _aggregate_rows(rows: list[dict]) -> dict:
-    total_signals = len({row["signal_id"] for row in rows})
-    evaluated = [row for row in rows if row["paper_pnl_per_contract"] is not None]
+    signal_ids = {row["signal_id"] for row in rows}
+    suspicious_ids = {
+        row["signal_id"]
+        for row in rows
+        if row.get("signal_category") == "suspicious_or_invalid"
+    }
+    usable_rows = [row for row in rows if row["signal_id"] not in suspicious_ids]
+    usable_signal_ids = signal_ids - suspicious_ids
+    simulated_long_yes_ids = {
+        row["signal_id"]
+        for row in usable_rows
+        if row.get("signal_category") in {"positive_edge_long_yes_simulated", "unevaluated_missing_future_price"}
+    }
+    evaluated_signal_ids = {
+        row["signal_id"]
+        for row in usable_rows
+        if row.get("signal_category") == "positive_edge_long_yes_simulated" and row["paper_pnl_per_contract"] is not None
+    }
+    tracked_negative_ids = {
+        row["signal_id"]
+        for row in usable_rows
+        if row.get("signal_category") == "negative_edge_overpricing_tracked_only"
+    }
+    invalid_signal_ids = {
+        row["signal_id"]
+        for row in rows
+        if row.get("evaluation_status") in {"invalid_probability", "suspicious_probability_orientation"}
+        or row.get("skip_reason") in {"invalid_probability_range", "suspicious_probability_orientation"}
+    }
+    evaluated = [
+        row
+        for row in usable_rows
+        if row.get("signal_category") == "positive_edge_long_yes_simulated" and row["paper_pnl_per_contract"] is not None
+    ]
     edge_closed = [row for row in evaluated if row["did_edge_close"] is not None]
     directional = [row for row in evaluated if row["moved_expected_direction"] is not None]
     return {
-        "total_signals": total_signals,
-        "evaluated_signals": len(evaluated),
-        "average_entry_edge": _avg([row["entry_net_edge"] for row in rows]),
+        "total_signals": len(usable_signal_ids),
+        "evaluated_signals": len(evaluated_signal_ids),
+        "simulated_long_yes_signals": len(simulated_long_yes_ids),
+        "evaluated_long_yes_signals": len(evaluated_signal_ids),
+        "tracked_negative_edge_signals": len(tracked_negative_ids),
+        "unevaluated_signals": len(simulated_long_yes_ids - evaluated_signal_ids),
+        "suspicious_invalid_signals": len(suspicious_ids | invalid_signal_ids),
+        "skipped_invalid_signals": len(invalid_signal_ids),
+        "average_entry_edge": _avg([row["entry_net_edge"] for row in usable_rows]),
         "average_paper_pnl_per_contract": _avg([row["paper_pnl_per_contract"] for row in evaluated]),
         "average_return_on_stake": _avg([row["return_on_stake"] for row in evaluated]),
         "edge_close_rate": _rate([row["did_edge_close"] for row in edge_closed]),
         "directional_accuracy": _rate([row["moved_expected_direction"] for row in directional]),
+        "contains_unadjusted_liquidity": any(row.get("liquidity_adjusted") is False for row in rows),
     }
 
 
@@ -499,6 +567,67 @@ def _confidence_bucket(value: float) -> str:
     if value >= 0.85:
         return "0.85-0.90"
     return "<0.85"
+
+
+def _probability_in_range(value: float | None) -> bool:
+    return value is not None and 0 <= value <= 1
+
+
+def _suspicion_reason(signal: PaperTradeSignal, payload: dict) -> str | None:
+    if abs(signal.entry_net_edge) > 0.50:
+        return "Net edge magnitude exceeded 50%, which usually indicates YES/NO orientation mismatch or stale data."
+    raw_side = str(payload.get("raw_outcome_side") or payload.get("raw_prediction_side") or "").lower()
+    raw_price = payload.get("raw_historical_price", payload.get("historical_price"))
+    try:
+        raw_price_float = float(raw_price) if raw_price is not None else None
+    except (TypeError, ValueError):
+        raw_price_float = None
+    if signal.market_type in {"futures", "awards", "outrights"} and signal.entry_market_yes_probability > 0.95:
+        title = signal.title.lower()
+        championship_text = any(term in title for term in ("finals", "stanley cup", "world cup", "championship", "win the"))
+        raw_no_leak = raw_side == "no" and raw_price_float is not None and raw_price_float > 0.95
+        if championship_text or raw_no_leak:
+            return "Futures/awards Market YES probability is above 95% for a likely longshot-style market."
+    return None
+
+
+def _derived_yes_from_payload(raw_side: str | None, raw_price: object, fallback: float) -> float:
+    try:
+        price = float(raw_price) if raw_price is not None else fallback
+    except (TypeError, ValueError):
+        price = fallback
+    if (raw_side or "").lower() == "no":
+        return 1 - price
+    return price
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _signal_category(direction: str, evaluation_status: str, pnl: float | None) -> str:
+    if evaluation_status in {"suspicious_probability_orientation", "invalid_probability"}:
+        return "suspicious_or_invalid"
+    if direction == "possible_yes_overpricing":
+        return "negative_edge_overpricing_tracked_only"
+    if direction == "possible_yes_underpricing":
+        return "positive_edge_long_yes_simulated" if pnl is not None else "unevaluated_missing_future_price"
+    return "unevaluated_missing_future_price"
+
+
+def _evaluation_status(result: SignalBacktestResult) -> str:
+    if result.paper_pnl_per_contract is not None:
+        return "evaluated" if result.exit_sportsbook_fair_probability is not None else "missing_future_fair"
+    if result.skip_reason == "missing_future_price" or result.skip_reason == "no_historical_polymarket_price":
+        return "missing_future_price"
+    if result.skip_reason == "invalid_probability_range":
+        return "invalid_probability"
+    if result.skip_reason in {"negative_edge_no_long_simulation", "negative_edge_no_default_paper_trade"}:
+        return "negative_edge_no_long_simulation"
+    return result.skip_reason or "unevaluated"
 
 
 @router.post("/user-models", response_model=UserModelOut, status_code=201)

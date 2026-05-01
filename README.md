@@ -139,6 +139,22 @@ docker compose exec backend python -m app.jobs.collect_historical_polymarket_pri
 
 # Reconstruct historical edges and write research-only paper-trade simulation results.
 docker compose exec backend python -m app.jobs.backtest_signals --limit 500
+
+# Debug a backtest without writing rows, allowing research-mode evaluation when liquidity is missing.
+docker compose exec backend python -m app.jobs.backtest_signals \
+  --dry-run --verbose --allow-missing-liquidity --exit-price-tolerance-minutes 120 --limit 500
+
+# Example: collect sportsbook odds for Apr 29-Apr 30, collect Polymarket prices through May 1,
+# then backtest. Longer horizons need Polymarket prices beyond the signal window.
+docker compose exec backend python -m app.jobs.collect_historical_sportsbook_odds \
+  --sport basketball_nba --market outrights \
+  --date-start 2026-04-29T00:00:00Z --date-end 2026-04-30T00:00:00Z \
+  --interval-minutes 60 --regions us --yes
+docker compose exec backend python -m app.jobs.collect_historical_polymarket_prices \
+  --date-start 2026-04-29T00:00:00Z --date-end 2026-05-01T00:00:00Z \
+  --fidelity-minutes 60 --limit 200
+docker compose exec backend python -m app.jobs.backtest_signals \
+  --allow-missing-liquidity --verbose --limit 500
 ```
 
 For a conservative local loop:
@@ -265,6 +281,27 @@ Backtest defaults:
 Positive-edge signals are treated as possible YES underpricing and can create a hypothetical long-YES paper position.
 Negative-edge signals are tracked as possible YES overpricing, but no default short simulation is created. Results are
 reported at `1h`, `6h`, `24h`, and `7d` horizons when future Polymarket prices are available.
+
+To evaluate a horizon, historical Polymarket price collection must extend at least that far past the signal timestamp.
+For example, a 24h horizon needs prices at least 24 hours after the signal window, and a 7d horizon needs prices at
+least 7 days after it. If `date_end` is too close to the generated signal timestamps, the Performance page will show
+unevaluated rows with `Missing future price`. Future sportsbook fair value is helpful for edge-close metrics, but
+paper P&L only requires an entry Market YES price and a future Market YES price.
+
+Useful backtest debug flags:
+
+- `--verbose`: print sample skipped rows with market, timestamp, price, sportsbook candidate, match scores, liquidity, and reason.
+- `--debug-market-id MARKET_ID`: print token id, raw YES/NO side, raw price, derived Market YES, sportsbook fair, and edge for one market.
+- `--dry-run`: report candidates and horizon evaluation stats without writing signals.
+- `--exit-price-tolerance-minutes`: nearest future Polymarket price tolerance for horizon exits, default `120`.
+- `--allow-missing-liquidity`: research mode for sparse historical liquidity. Rows are marked as not liquidity-adjusted.
+
+Polymarket CLOB price history is token-based. Nautilus records the token id, raw outcome side (`Yes` or `No`), raw
+token price, and derived Market YES probability. For No-token rows, `derived Market YES = 1 - raw No price`; for
+Yes-token rows, `derived Market YES = raw Yes price`. Futures/outrights are always oriented to the named team,
+player, or outcome winning. Rows with probability values outside `[0, 1]`, extreme edge magnitude, or suspicious
+longshot futures orientation are marked `suspicious_probability_orientation` or invalid and excluded from aggregate
+paper-simulation metrics.
 
 Metrics:
 

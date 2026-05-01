@@ -33,21 +33,21 @@ async def _collect(args) -> int:
     saved = 0
     async with httpx.AsyncClient(base_url=str(settings.polymarket_clob_api_url), timeout=30) as client:
         for market in markets:
-            token_id = _token_id_for_market(market)
-            if not token_id:
+            token_meta = _token_metadata_for_market(market)
+            if not token_meta["token_id"]:
                 logger.info("Skipping %s: no Polymarket token id found in raw metadata", market.id)
                 continue
             prices = await _fetch_prices(
                 client,
-                token_id=token_id,
+                token_id=str(token_meta["token_id"]),
                 start=_parse_datetime_arg(args.date_start),
                 end=_parse_datetime_arg(args.date_end),
                 fidelity=args.fidelity_minutes,
             )
             if not prices:
-                logger.info("No historical Polymarket prices returned for %s token=%s", market.id, token_id)
+                logger.info("No historical Polymarket prices returned for %s token=%s", market.id, token_meta["token_id"])
                 continue
-            saved += _persist_prices(market.id, token_id, market, prices)
+            saved += _persist_prices(market.id, token_meta, market, prices)
     return saved
 
 
@@ -76,9 +76,10 @@ async def _fetch_prices(
     return history if isinstance(history, list) else []
 
 
-def _persist_prices(market_id: str, token_id: str, market: Market, prices: list[dict[str, Any]]) -> int:
+def _persist_prices(market_id: str, token_meta: dict[str, Any], market: Market, prices: list[dict[str, Any]]) -> int:
     market_type = effective_prediction_market_type(market)
-    raw_selection = market.selection
+    token_id = str(token_meta["token_id"])
+    raw_selection = str(token_meta.get("raw_outcome_side") or market.selection)
     display_outcome = _display_outcome(market)
     records: list[HistoricalPredictionMarketPriceSnapshot] = []
     for item in prices:
@@ -100,7 +101,18 @@ def _persist_prices(market_id: str, token_id: str, market: Market, prices: list[
                 liquidity=None,
                 volume=None,
                 timestamp=timestamp,
-                raw_payload=item,
+                raw_payload={
+                    "price": item,
+                    "token_id": token_id,
+                    "raw_outcome_side": raw_selection,
+                    "raw_price": raw_price,
+                    "derived_market_yes_probability": market_yes_price,
+                    "display_outcome": display_outcome,
+                    "market_title": market.event_name,
+                    "condition_id": token_meta.get("condition_id"),
+                    "market_external_id": market.external_id,
+                    "polymarket_market_id": token_meta.get("polymarket_market_id"),
+                },
             )
         )
     if not records:
@@ -127,18 +139,29 @@ def _markets_to_collect(db, market_id: str | None, limit: int) -> list[Market]:
     return list(db.scalars(stmt))
 
 
-def _token_id_for_market(market: Market) -> str | None:
+def _token_metadata_for_market(market: Market) -> dict[str, Any]:
     raw = market.extra.get("raw_market") if isinstance(market.extra, dict) else None
     payload = raw.get("market") if isinstance(raw, dict) and isinstance(raw.get("market"), dict) else raw
     if not isinstance(payload, dict):
-        return None
+        return {"token_id": None, "raw_outcome_side": market.selection}
     outcome_index = int(raw.get("outcome_index", 0)) if isinstance(raw, dict) else 0
+    outcomes = _jsonish_list(payload.get("outcomes"))
+    raw_outcome_side = str(outcomes[outcome_index]) if outcome_index < len(outcomes) else str(market.selection)
+    token_id = None
     for key in ("clobTokenIds", "clob_token_ids", "tokenIds", "token_ids"):
         values = _jsonish_list(payload.get(key))
         if outcome_index < len(values):
-            return str(values[outcome_index])
-    value = payload.get("token_id") or payload.get("tokenId")
-    return str(value) if value else None
+            token_id = str(values[outcome_index])
+            break
+    if token_id is None:
+        value = payload.get("token_id") or payload.get("tokenId")
+        token_id = str(value) if value else None
+    return {
+        "token_id": token_id,
+        "raw_outcome_side": raw_outcome_side,
+        "condition_id": payload.get("condition_id") or payload.get("conditionId"),
+        "polymarket_market_id": payload.get("id"),
+    }
 
 
 def _jsonish_list(value: object) -> list[Any]:
@@ -163,7 +186,7 @@ def _parse_price_item(item: object) -> tuple[datetime, float] | None:
         price = float(price_value)
     except (TypeError, ValueError, OSError):
         return None
-    return timestamp, max(0.0, min(1.0, price))
+    return timestamp, price
 
 
 def _display_outcome(market: Market) -> str | None:
@@ -182,7 +205,14 @@ def _parse_datetime_arg(value: str) -> datetime:
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Collect historical Polymarket YES/NO token prices.")
+    parser = argparse.ArgumentParser(
+        description="Collect historical Polymarket YES/NO token prices.",
+        epilog=(
+            "Backtest horizon evaluation requires price history after the signal window. "
+            "For 24h results, collect prices at least 24h past the signal date range; "
+            "for 7d results, collect prices at least 7d past it."
+        ),
+    )
     parser.add_argument("--market-id")
     parser.add_argument("--date-start", required=True)
     parser.add_argument("--date-end", required=True)

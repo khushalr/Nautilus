@@ -124,21 +124,35 @@ class SignalPerformanceBucket(BaseModel):
     key: str
     total_signals: int
     evaluated_signals: int
+    simulated_long_yes_signals: int = 0
+    evaluated_long_yes_signals: int = 0
+    tracked_negative_edge_signals: int = 0
+    unevaluated_signals: int = 0
+    suspicious_invalid_signals: int = 0
+    skipped_invalid_signals: int = 0
     average_entry_edge: float | None = None
     average_paper_pnl_per_contract: float | None = None
     average_return_on_stake: float | None = None
     edge_close_rate: float | None = None
     directional_accuracy: float | None = None
+    contains_unadjusted_liquidity: bool = False
 
 
 class SignalPerformanceSummary(BaseModel):
     total_signals: int
     evaluated_signals: int
+    simulated_long_yes_signals: int = 0
+    evaluated_long_yes_signals: int = 0
+    tracked_negative_edge_signals: int = 0
+    unevaluated_signals: int = 0
+    suspicious_invalid_signals: int = 0
+    skipped_invalid_signals: int = 0
     average_entry_edge: float | None = None
     average_paper_pnl_per_contract: float | None = None
     average_return_on_stake: float | None = None
     edge_close_rate: float | None = None
     directional_accuracy: float | None = None
+    contains_unadjusted_liquidity: bool = False
     by_horizon: list[SignalPerformanceBucket] = Field(default_factory=list)
     by_confidence_bucket: list[SignalPerformanceBucket] = Field(default_factory=list)
     by_market_type: list[SignalPerformanceBucket] = Field(default_factory=list)
@@ -156,7 +170,7 @@ class SignalPerformanceRow(BaseModel):
     direction: str
     entry_market_yes_probability: float
     entry_sportsbook_fair_probability: float
-    entry_net_edge: float
+    entry_net_edge: float | None = None
     horizon: str
     exit_market_yes_probability: float | None = None
     paper_pnl_per_contract: float | None = None
@@ -165,6 +179,14 @@ class SignalPerformanceRow(BaseModel):
     moved_expected_direction: bool | None = None
     confidence_score: float
     skip_reason: str | None = None
+    evaluation_status: str
+    signal_category: str
+    raw_outcome_side: str | None = None
+    raw_historical_price: float | None = None
+    derived_market_yes_probability: float | None = None
+    suspicion_reason: str | None = None
+    liquidity_status: str | None = None
+    liquidity_adjusted: bool | None = None
 
 
 class UserModelCreate(BaseModel):

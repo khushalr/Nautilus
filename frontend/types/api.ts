@@ -97,21 +97,35 @@ export type SignalPerformanceBucket = {
   key: string;
   total_signals: number;
   evaluated_signals: number;
+  simulated_long_yes_signals: number;
+  evaluated_long_yes_signals: number;
+  tracked_negative_edge_signals: number;
+  unevaluated_signals: number;
+  suspicious_invalid_signals: number;
+  skipped_invalid_signals: number;
   average_entry_edge: number | null;
   average_paper_pnl_per_contract: number | null;
   average_return_on_stake: number | null;
   edge_close_rate: number | null;
   directional_accuracy: number | null;
+  contains_unadjusted_liquidity: boolean;
 };
 
 export type SignalPerformanceSummary = {
   total_signals: number;
   evaluated_signals: number;
+  simulated_long_yes_signals: number;
+  evaluated_long_yes_signals: number;
+  tracked_negative_edge_signals: number;
+  unevaluated_signals: number;
+  suspicious_invalid_signals: number;
+  skipped_invalid_signals: number;
   average_entry_edge: number | null;
   average_paper_pnl_per_contract: number | null;
   average_return_on_stake: number | null;
   edge_close_rate: number | null;
   directional_accuracy: number | null;
+  contains_unadjusted_liquidity: boolean;
   by_horizon: SignalPerformanceBucket[];
   by_confidence_bucket: SignalPerformanceBucket[];
   by_market_type: SignalPerformanceBucket[];
@@ -129,7 +143,7 @@ export type SignalPerformanceRow = {
   direction: string;
   entry_market_yes_probability: number;
   entry_sportsbook_fair_probability: number;
-  entry_net_edge: number;
+  entry_net_edge: number | null;
   horizon: string;
   exit_market_yes_probability: number | null;
   paper_pnl_per_contract: number | null;
@@ -138,6 +152,14 @@ export type SignalPerformanceRow = {
   moved_expected_direction: boolean | null;
   confidence_score: number;
   skip_reason: string | null;
+  evaluation_status: string;
+  signal_category: string;
+  raw_outcome_side: string | null;
+  raw_historical_price: number | null;
+  derived_market_yes_probability: number | null;
+  suspicion_reason: string | null;
+  liquidity_status: string | null;
+  liquidity_adjusted: boolean | null;
 };
 
 export type MarketDetail = {

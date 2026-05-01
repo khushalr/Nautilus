@@ -9,11 +9,18 @@ import type { SignalPerformanceBucket, SignalPerformanceRow, SignalPerformanceSu
 const emptySummary: SignalPerformanceSummary = {
   total_signals: 0,
   evaluated_signals: 0,
+  simulated_long_yes_signals: 0,
+  evaluated_long_yes_signals: 0,
+  tracked_negative_edge_signals: 0,
+  unevaluated_signals: 0,
+  suspicious_invalid_signals: 0,
+  skipped_invalid_signals: 0,
   average_entry_edge: null,
   average_paper_pnl_per_contract: null,
   average_return_on_stake: null,
   edge_close_rate: null,
   directional_accuracy: null,
+  contains_unadjusted_liquidity: false,
   by_horizon: [],
   by_confidence_bucket: [],
   by_market_type: [],
@@ -25,6 +32,13 @@ export function PerformanceDashboard() {
   const [signals, setSignals] = useState<SignalPerformanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [directionFilter, setDirectionFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [horizonFilter, setHorizonFilter] = useState("all");
+  const [marketTypeFilter, setMarketTypeFilter] = useState("all");
+  const [leagueFilter, setLeagueFilter] = useState("all");
+  const [minConfidence, setMinConfidence] = useState(0);
+  const [hideSuspicious, setHideSuspicious] = useState(true);
 
   async function load() {
     setLoading(true);
@@ -80,9 +94,20 @@ export function PerformanceDashboard() {
         </div>
       ) : null}
 
+      {summary.contains_unadjusted_liquidity ? (
+        <div className="flex items-start gap-3 border border-amber-400/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>Some historical signals were evaluated without historical liquidity and may not represent executable size.</div>
+        </div>
+      ) : null}
+
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <Metric label="Total signals" value={String(summary.total_signals)} />
-        <Metric label="Evaluated" value={String(summary.evaluated_signals)} />
+        <Metric label="Simulated long YES" value={String(summary.simulated_long_yes_signals)} />
+        <Metric label="Evaluated long YES" value={String(summary.evaluated_long_yes_signals)} />
+        <Metric label="Tracked negative" value={String(summary.tracked_negative_edge_signals)} />
+        <Metric label="Unevaluated" value={String(summary.unevaluated_signals)} />
+        <Metric label="Suspicious/invalid" value={String(summary.suspicious_invalid_signals)} />
         <Metric label="Edge close rate" value={formatPercent(summary.edge_close_rate)} />
         <Metric label="Directional accuracy" value={formatPercent(summary.directional_accuracy)} />
         <Metric label="Avg P&L / contract" value={formatSignedCurrency(summary.average_paper_pnl_per_contract)} />
@@ -96,8 +121,106 @@ export function PerformanceDashboard() {
         <BucketTable title="By League" rows={summary.by_league} />
       </section>
 
-      <SignalTable rows={signals} loading={loading} />
+      <SignalFilters
+        rows={signals}
+        directionFilter={directionFilter}
+        setDirectionFilter={setDirectionFilter}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        horizonFilter={horizonFilter}
+        setHorizonFilter={setHorizonFilter}
+        marketTypeFilter={marketTypeFilter}
+        setMarketTypeFilter={setMarketTypeFilter}
+        leagueFilter={leagueFilter}
+        setLeagueFilter={setLeagueFilter}
+        minConfidence={minConfidence}
+        setMinConfidence={setMinConfidence}
+        hideSuspicious={hideSuspicious}
+        setHideSuspicious={setHideSuspicious}
+      />
+
+      <SignalTable rows={filterRows(signals, { directionFilter, statusFilter, horizonFilter, marketTypeFilter, leagueFilter, minConfidence, hideSuspicious })} loading={loading} />
     </div>
+  );
+}
+
+function SignalFilters({
+  rows,
+  directionFilter,
+  setDirectionFilter,
+  statusFilter,
+  setStatusFilter,
+  horizonFilter,
+  setHorizonFilter,
+  marketTypeFilter,
+  setMarketTypeFilter,
+  leagueFilter,
+  setLeagueFilter,
+  minConfidence,
+  setMinConfidence,
+  hideSuspicious,
+  setHideSuspicious
+}: {
+  rows: SignalPerformanceRow[];
+  directionFilter: string;
+  setDirectionFilter: (value: string) => void;
+  statusFilter: string;
+  setStatusFilter: (value: string) => void;
+  horizonFilter: string;
+  setHorizonFilter: (value: string) => void;
+  marketTypeFilter: string;
+  setMarketTypeFilter: (value: string) => void;
+  leagueFilter: string;
+  setLeagueFilter: (value: string) => void;
+  minConfidence: number;
+  setMinConfidence: (value: number) => void;
+  hideSuspicious: boolean;
+  setHideSuspicious: (value: boolean) => void;
+}) {
+  const statuses = unique(rows.map((row) => row.evaluation_status));
+  const horizons = unique(rows.map((row) => row.horizon));
+  const marketTypes = unique(rows.map((row) => row.market_type));
+  const leagues = unique(rows.map((row) => row.league ?? "Unknown"));
+
+  return (
+    <section className="grid gap-3 border border-line bg-ink/70 p-4 md:grid-cols-3 xl:grid-cols-7">
+      <Select label="Direction" value={directionFilter} onChange={setDirectionFilter} options={["all", "positive", "negative"]} />
+      <Select label="Status" value={statusFilter} onChange={setStatusFilter} options={["all", ...statuses]} />
+      <Select label="Horizon" value={horizonFilter} onChange={setHorizonFilter} options={["all", ...horizons]} />
+      <Select label="Market type" value={marketTypeFilter} onChange={setMarketTypeFilter} options={["all", ...marketTypes]} />
+      <Select label="League" value={leagueFilter} onChange={setLeagueFilter} options={["all", ...leagues]} />
+      <label className="space-y-1 text-xs uppercase tracking-[0.12em] text-steel">
+        <span>Min confidence</span>
+        <input
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+          value={minConfidence}
+          onChange={(event) => setMinConfidence(Number(event.target.value))}
+          className="w-full border border-line bg-panel px-2 py-2 font-mono text-sm text-white outline-none"
+        />
+      </label>
+      <label className="flex items-end gap-2 pb-2 text-sm text-steel">
+        <input type="checkbox" checked={hideSuspicious} onChange={(event) => setHideSuspicious(event.target.checked)} />
+        Hide suspicious
+      </label>
+    </section>
+  );
+}
+
+function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  return (
+    <label className="space-y-1 text-xs uppercase tracking-[0.12em] text-steel">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full border border-line bg-panel px-2 py-2 text-sm normal-case tracking-normal text-white outline-none">
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {formatStatus(option, null)}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -119,6 +242,7 @@ function BucketTable({ title, rows }: { title: string; rows: SignalPerformanceBu
           <tr>
             <th className="py-2 text-left font-medium">Group</th>
             <th className="py-2 text-right font-medium">Signals</th>
+            <th className="py-2 text-right font-medium">Uneval.</th>
             <th className="py-2 text-right font-medium">Edge close</th>
             <th className="py-2 text-right font-medium">Direction</th>
             <th className="py-2 text-right font-medium">Avg P&L</th>
@@ -127,7 +251,7 @@ function BucketTable({ title, rows }: { title: string; rows: SignalPerformanceBu
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={5} className="py-5 text-center text-steel">
+              <td colSpan={6} className="py-5 text-center text-steel">
                 No backtest results yet.
               </td>
             </tr>
@@ -136,6 +260,7 @@ function BucketTable({ title, rows }: { title: string; rows: SignalPerformanceBu
               <tr key={row.key} className="border-b border-line/70">
                 <td className="py-2 text-white">{row.key}</td>
                 <td className="py-2 text-right font-mono">{row.evaluated_signals}/{row.total_signals}</td>
+                <td className="py-2 text-right font-mono">{row.unevaluated_signals}</td>
                 <td className="py-2 text-right font-mono">{formatPercent(row.edge_close_rate)}</td>
                 <td className="py-2 text-right font-mono">{formatPercent(row.directional_accuracy)}</td>
                 <td className="py-2 text-right font-mono">{formatSignedCurrency(row.average_paper_pnl_per_contract)}</td>
@@ -155,14 +280,20 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
         Signal Rows
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1280px] w-full text-sm">
+        <table className="min-w-[1680px] w-full text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-[0.12em] text-steel">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Timestamp</th>
               <th className="px-4 py-3 text-left font-medium">Market</th>
               <th className="px-4 py-3 text-left font-medium">Outcome</th>
+              <th className="px-4 py-3 text-right font-medium">Market YES</th>
+              <th className="px-4 py-3 text-right font-medium">Sportsbook Fair</th>
               <th className="px-4 py-3 text-right font-medium">Entry edge</th>
+              <th className="px-4 py-3 text-right font-medium">Raw side</th>
+              <th className="px-4 py-3 text-right font-medium">Raw price</th>
+              <th className="px-4 py-3 text-right font-medium">Derived YES</th>
               <th className="px-4 py-3 text-right font-medium">Horizon</th>
+              <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-right font-medium">Paper P&L</th>
               <th className="px-4 py-3 text-right font-medium">Return</th>
               <th className="px-4 py-3 text-right font-medium">Direction</th>
@@ -173,7 +304,7 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-steel">
+                <td colSpan={16} className="px-4 py-8 text-center text-steel">
                   {loading ? "Loading historical signal performance..." : "No historical paper-trade simulation rows yet."}
                 </td>
               </tr>
@@ -183,8 +314,14 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
                   <td className="px-4 py-3 text-steel">{formatDateTime(row.timestamp)}</td>
                   <td className="px-4 py-3 text-white">{row.title}</td>
                   <td className="px-4 py-3 text-steel">{row.display_outcome ?? "n/a"}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.entry_market_yes_probability)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.entry_sportsbook_fair_probability)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatSignedPercent(row.entry_net_edge)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{row.raw_outcome_side ?? "n/a"}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.raw_historical_price)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.derived_market_yes_probability)}</td>
                   <td className="px-4 py-3 text-right font-mono">{row.horizon}</td>
+                  <td className="px-4 py-3 text-steel" title={row.suspicion_reason ?? row.skip_reason ?? undefined}>{formatStatus(row.evaluation_status, row.skip_reason)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatSignedCurrency(row.paper_pnl_per_contract)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatSignedPercent(row.return_on_stake)}</td>
                   <td className="px-4 py-3 text-right">{formatBoolean(row.moved_expected_direction)}</td>
@@ -213,4 +350,48 @@ function formatBoolean(value: boolean | null): string {
     return "n/a";
   }
   return value ? "Yes" : "No";
+}
+
+function formatStatus(status: string, skipReason: string | null): string {
+  const labels: Record<string, string> = {
+    all: "All",
+    positive: "Positive edge only",
+    negative: "Negative edge only",
+    evaluated: "Evaluated",
+    missing_future_price: "Missing future price",
+    missing_future_fair: "Missing future fair",
+    invalid_probability: "Invalid probability",
+    negative_edge_no_long_simulation: "No long-YES simulation",
+    suspicious_probability_orientation: "Suspicious orientation"
+  };
+  return labels[status] ?? skipReason ?? status;
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values)).filter(Boolean).sort();
+}
+
+function filterRows(
+  rows: SignalPerformanceRow[],
+  filters: {
+    directionFilter: string;
+    statusFilter: string;
+    horizonFilter: string;
+    marketTypeFilter: string;
+    leagueFilter: string;
+    minConfidence: number;
+    hideSuspicious: boolean;
+  }
+): SignalPerformanceRow[] {
+  return rows.filter((row) => {
+    if (filters.hideSuspicious && row.signal_category === "suspicious_or_invalid") return false;
+    if (filters.directionFilter === "positive" && row.direction !== "possible_yes_underpricing") return false;
+    if (filters.directionFilter === "negative" && row.direction !== "possible_yes_overpricing") return false;
+    if (filters.statusFilter !== "all" && row.evaluation_status !== filters.statusFilter) return false;
+    if (filters.horizonFilter !== "all" && row.horizon !== filters.horizonFilter) return false;
+    if (filters.marketTypeFilter !== "all" && row.market_type !== filters.marketTypeFilter) return false;
+    if (filters.leagueFilter !== "all" && (row.league ?? "Unknown") !== filters.leagueFilter) return false;
+    if (row.confidence_score < filters.minConfidence) return false;
+    return true;
+  });
 }
