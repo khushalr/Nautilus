@@ -120,6 +120,53 @@ class OpportunityHistoryRow(BaseModel):
     confidence_score: float
 
 
+class SignalPerformanceBucket(BaseModel):
+    key: str
+    total_signals: int
+    evaluated_signals: int
+    average_entry_edge: float | None = None
+    average_paper_pnl_per_contract: float | None = None
+    average_return_on_stake: float | None = None
+    edge_close_rate: float | None = None
+    directional_accuracy: float | None = None
+
+
+class SignalPerformanceSummary(BaseModel):
+    total_signals: int
+    evaluated_signals: int
+    average_entry_edge: float | None = None
+    average_paper_pnl_per_contract: float | None = None
+    average_return_on_stake: float | None = None
+    edge_close_rate: float | None = None
+    directional_accuracy: float | None = None
+    by_horizon: list[SignalPerformanceBucket] = Field(default_factory=list)
+    by_confidence_bucket: list[SignalPerformanceBucket] = Field(default_factory=list)
+    by_market_type: list[SignalPerformanceBucket] = Field(default_factory=list)
+    by_league: list[SignalPerformanceBucket] = Field(default_factory=list)
+
+
+class SignalPerformanceRow(BaseModel):
+    signal_id: str
+    market_id: str
+    timestamp: datetime
+    title: str
+    display_outcome: str | None = None
+    market_type: str
+    league: str | None = None
+    direction: str
+    entry_market_yes_probability: float
+    entry_sportsbook_fair_probability: float
+    entry_net_edge: float
+    horizon: str
+    exit_market_yes_probability: float | None = None
+    paper_pnl_per_contract: float | None = None
+    return_on_stake: float | None = None
+    did_edge_close: bool | None = None
+    moved_expected_direction: bool | None = None
+    confidence_score: float
+    skip_reason: str | None = None
+
+
 class UserModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     config: dict[str, Any] = Field(default_factory=dict)

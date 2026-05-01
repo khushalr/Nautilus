@@ -85,6 +85,32 @@ class PredictionMarketSnapshot(Base):
     market: Mapped[Market] = relationship(back_populates="prediction_snapshots")
 
 
+class HistoricalPredictionMarketPriceSnapshot(Base):
+    __tablename__ = "historical_prediction_market_price_snapshots"
+    __table_args__ = (
+        Index("ix_historical_prediction_market_time", "market_id", "timestamp"),
+        Index("ix_historical_prediction_token_time", "token_id", "timestamp"),
+        UniqueConstraint("market_id", "token_id", "timestamp", name="uq_historical_prediction_market_token_time"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    market_id: Mapped[str] = mapped_column(ForeignKey("markets.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    token_id: Mapped[str | None] = mapped_column(String(220))
+    raw_selection: Mapped[str] = mapped_column(String(180), nullable=False)
+    display_outcome: Mapped[str | None] = mapped_column(String(180))
+    raw_price: Mapped[float] = mapped_column(Float, nullable=False)
+    market_yes_price: Mapped[float] = mapped_column(Float, nullable=False)
+    orientation: Mapped[str] = mapped_column(String(80), nullable=False)
+    liquidity: Mapped[float | None] = mapped_column(Float)
+    volume: Mapped[float | None] = mapped_column(Float)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    raw_payload: Mapped[dict] = mapped_column(JSON_DICT, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    market: Mapped[Market] = relationship()
+
+
 class SportsbookEvent(TimestampMixin, Base):
     __tablename__ = "sportsbook_events"
     __table_args__ = (
@@ -131,6 +157,33 @@ class SportsbookOddsSnapshot(Base):
     event: Mapped[SportsbookEvent] = relationship(back_populates="odds_snapshots")
 
 
+class HistoricalSportsbookOddsSnapshot(Base):
+    __tablename__ = "historical_sportsbook_odds_snapshots"
+    __table_args__ = (
+        Index("ix_historical_sportsbook_snapshot_market", "snapshot_timestamp", "market_type"),
+        Index("ix_historical_sportsbook_event_selection", "provider_event_id", "selection", "snapshot_timestamp"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    provider: Mapped[str] = mapped_column(String(60), default="odds_api", nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String(180), nullable=False)
+    event_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    league: Mapped[str | None] = mapped_column(String(80))
+    home_team: Mapped[str | None] = mapped_column(String(180))
+    away_team: Mapped[str | None] = mapped_column(String(180))
+    normalized_event_key: Mapped[str] = mapped_column(String(260), nullable=False)
+    start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bookmaker: Mapped[str] = mapped_column(String(120), nullable=False)
+    market_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    selection: Mapped[str] = mapped_column(String(180), nullable=False)
+    american_odds: Mapped[int | None] = mapped_column(Integer)
+    decimal_odds: Mapped[float | None] = mapped_column(Float)
+    implied_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    snapshot_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    raw_payload: Mapped[dict] = mapped_column(JSON_DICT, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class FairValueSnapshot(Base):
     __tablename__ = "fair_value_snapshots"
     __table_args__ = (
@@ -154,6 +207,66 @@ class FairValueSnapshot(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     market: Mapped[Market] = relationship(back_populates="fair_value_snapshots")
+
+
+class PaperTradeSignal(Base):
+    __tablename__ = "paper_trade_signals"
+    __table_args__ = (
+        Index("ix_paper_trade_signals_market_timestamp", "market_id", "timestamp"),
+        Index("ix_paper_trade_signals_direction", "direction"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    market_id: Mapped[str] = mapped_column(ForeignKey("markets.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    market_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    league: Mapped[str | None] = mapped_column(String(80))
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    display_outcome: Mapped[str | None] = mapped_column(String(180))
+    direction: Mapped[str] = mapped_column(String(80), nullable=False)
+    entry_market_yes_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_sportsbook_fair_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_net_edge: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
+    match_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    liquidity: Mapped[float | None] = mapped_column(Float)
+    raw_payload: Mapped[dict] = mapped_column(JSON_DICT, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    market: Mapped[Market] = relationship()
+    results: Mapped[list[SignalBacktestResult]] = relationship(
+        back_populates="signal",
+        cascade="all, delete-orphan",
+    )
+
+
+class SignalBacktestResult(Base):
+    __tablename__ = "signal_backtest_results"
+    __table_args__ = (
+        Index("ix_signal_backtest_results_horizon", "horizon"),
+        Index("ix_signal_backtest_results_market_horizon", "market_id", "horizon"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("paper_trade_signals.id", ondelete="CASCADE"), nullable=False)
+    market_id: Mapped[str] = mapped_column(ForeignKey("markets.id", ondelete="CASCADE"), nullable=False)
+    horizon: Mapped[str] = mapped_column(String(20), nullable=False)
+    exit_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_market_yes_probability: Mapped[float | None] = mapped_column(Float)
+    exit_sportsbook_fair_probability: Mapped[float | None] = mapped_column(Float)
+    exit_net_edge: Mapped[float | None] = mapped_column(Float)
+    paper_pnl_per_contract: Mapped[float | None] = mapped_column(Float)
+    return_on_stake: Mapped[float | None] = mapped_column(Float)
+    edge_change: Mapped[float | None] = mapped_column(Float)
+    did_edge_close: Mapped[bool | None] = mapped_column(Boolean)
+    moved_expected_direction: Mapped[bool | None] = mapped_column(Boolean)
+    skip_reason: Mapped[str | None] = mapped_column(String(120))
+    raw_payload: Mapped[dict] = mapped_column(JSON_DICT, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    signal: Mapped[PaperTradeSignal] = relationship(back_populates="results")
+    market: Mapped[Market] = relationship()
 
 
 class UserModel(TimestampMixin, Base):

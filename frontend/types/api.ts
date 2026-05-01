@@ -93,6 +93,53 @@ export type OpportunityHistoryRow = {
   confidence_score: number;
 };
 
+export type SignalPerformanceBucket = {
+  key: string;
+  total_signals: number;
+  evaluated_signals: number;
+  average_entry_edge: number | null;
+  average_paper_pnl_per_contract: number | null;
+  average_return_on_stake: number | null;
+  edge_close_rate: number | null;
+  directional_accuracy: number | null;
+};
+
+export type SignalPerformanceSummary = {
+  total_signals: number;
+  evaluated_signals: number;
+  average_entry_edge: number | null;
+  average_paper_pnl_per_contract: number | null;
+  average_return_on_stake: number | null;
+  edge_close_rate: number | null;
+  directional_accuracy: number | null;
+  by_horizon: SignalPerformanceBucket[];
+  by_confidence_bucket: SignalPerformanceBucket[];
+  by_market_type: SignalPerformanceBucket[];
+  by_league: SignalPerformanceBucket[];
+};
+
+export type SignalPerformanceRow = {
+  signal_id: string;
+  market_id: string;
+  timestamp: string;
+  title: string;
+  display_outcome: string | null;
+  market_type: string;
+  league: string | null;
+  direction: string;
+  entry_market_yes_probability: number;
+  entry_sportsbook_fair_probability: number;
+  entry_net_edge: number;
+  horizon: string;
+  exit_market_yes_probability: number | null;
+  paper_pnl_per_contract: number | null;
+  return_on_stake: number | null;
+  did_edge_close: boolean | null;
+  moved_expected_direction: boolean | null;
+  confidence_score: number;
+  skip_reason: string | null;
+};
+
 export type MarketDetail = {
   market: Market;
   latest_fair_value: FairValueSnapshot | null;

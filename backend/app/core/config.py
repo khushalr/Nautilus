@@ -20,6 +20,10 @@ class Settings(BaseSettings):
         default="https://gamma-api.polymarket.com",
         alias="POLYMARKET_API_URL",
     )
+    polymarket_clob_api_url: AnyUrl = Field(
+        default="https://clob.polymarket.com",
+        alias="POLYMARKET_CLOB_API_URL",
+    )
 
     kalshi_api_url: AnyUrl = Field(
         default="https://trading-api.kalshi.com/trade-api/v2",

@@ -124,6 +124,21 @@ docker compose exec -e SPORTSBOOK_MARKETS_TO_COLLECT=h2h,outrights backend pytho
 
 # Compute fair values after snapshots are collected.
 docker compose exec backend python -m app.jobs.compute_fair_values
+
+# Opt-in historical sportsbook collection. Prints an estimated credit cost and requires --yes for larger ranges.
+docker compose exec backend python -m app.jobs.collect_historical_sportsbook_odds \
+  --sport basketball_nba --market h2h \
+  --date-start 2026-04-01T00:00:00Z --date-end 2026-04-01T06:00:00Z \
+  --interval-minutes 60 --regions us
+
+# Opt-in historical Polymarket price collection for stored Polymarket markets.
+docker compose exec backend python -m app.jobs.collect_historical_polymarket_prices \
+  --market-id MARKET_ID \
+  --date-start 2026-04-01T00:00:00Z --date-end 2026-04-02T00:00:00Z \
+  --fidelity-minutes 60
+
+# Reconstruct historical edges and write research-only paper-trade simulation results.
+docker compose exec backend python -m app.jobs.backtest_signals --limit 500
 ```
 
 For a conservative local loop:
@@ -149,6 +164,9 @@ The loop collects Polymarket every 5 minutes, sportsbook odds every 1 hour by de
 - `GET /user-models`
 - `POST /alerts`
 - `GET /alerts`
+- `GET /signals/performance`: aggregate historical paper-trade simulation metrics.
+- `GET /signals/performance/signals`: lightweight signal-level paper simulation rows.
+- `GET /signals/performance/{market_id}`: market-level historical signal rows.
 
 ## Fair-Value Methodology
 
@@ -223,6 +241,40 @@ Each `fair_value_snapshots` row stores an `explanation_json` object with selecte
 Fair-value snapshots are append-only, so repeated `compute_fair_values` runs create a history of signal quality over time. The history endpoint intentionally omits raw provider blobs, assumptions, and explanation JSON.
 
 User models are stored as JSON configuration only. Nautilus does not execute user-provided Python code.
+
+## Historical Signal Backtesting
+
+Historical backtesting is opt-in. Nautilus can collect historical sportsbook odds, collect Polymarket CLOB price history,
+reconstruct historical edges, and store research-only paper-trade simulation results. The simulation does not connect
+wallets, submit orders, accept stakes, or model real execution.
+
+Historical collection is intentionally quota-safe:
+
+- `collect_historical_sportsbook_odds` estimates expected Odds API credit usage before running.
+- Larger jobs are refused unless `--yes` is supplied.
+- Odds API keys are redacted in logs.
+- Quota headers are respected, and low/exhausted quota can trigger the configured email alert path.
+
+Backtest defaults:
+
+- `min_abs_edge = 0.015`
+- `min_confidence_score = 0.85`
+- `min_liquidity = 50000`
+- `min_match_confidence = 0.85`
+
+Positive-edge signals are treated as possible YES underpricing and can create a hypothetical long-YES paper position.
+Negative-edge signals are tracked as possible YES overpricing, but no default short simulation is created. Results are
+reported at `1h`, `6h`, `24h`, and `7d` horizons when future Polymarket prices are available.
+
+Metrics:
+
+- Paper P&L per `$1` payout contract is `future Market YES - entry Market YES`.
+- Return on stake is paper P&L divided by entry Market YES.
+- Edge close rate measures whether the later edge moved below the configured close threshold.
+- Directional accuracy measures whether Market YES moved upward after a positive-edge signal.
+
+Limitations: historical data may be sparse, prices may not have been available at meaningful size, and fees, spreads,
+liquidity, settlement differences, stale data, and sportsbook benchmark error can materially change results.
 
 ## Database Tables
 

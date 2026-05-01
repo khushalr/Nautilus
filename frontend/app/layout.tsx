@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Activity, Bell, BookOpen, SlidersHorizontal } from "lucide-react";
+import { Activity, BarChart3, Bell, BookOpen, SlidersHorizontal } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 
 const navItems = [
   { href: "/", label: "Scanner", icon: Activity },
+  { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/methodology", label: "Methodology", icon: BookOpen },
   { href: "/user-models", label: "Models", icon: SlidersHorizontal },
   { href: "/alerts", label: "Alerts", icon: Bell }

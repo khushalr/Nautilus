@@ -63,9 +63,41 @@ export default function MethodologyPage() {
         </Panel>
         <Panel title="Research, Not Instructions">
           <p>
-            Nautilus does not tell users to buy, sell, or wager. If a user independently trusts sportsbook fair value
-            more than the prediction-market price, a positive Net Edge may suggest the YES contract is cheaper than that
-            external benchmark. Nautilus does not recommend whether to trade, wager, or where to put money.
+            Nautilus does not provide instructions for real-world execution. If a user independently trusts sportsbook
+            fair value more than the prediction-market price, a positive Net Edge may suggest the YES contract is lower
+            than that external benchmark. Nautilus remains research and analytics software.
+          </p>
+        </Panel>
+        <Panel title="Historical Signals">
+          <p>
+            A historical signal is a timestamp where reconstructed Market YES, Sportsbook Fair, confidence, match
+            confidence, and liquidity pass the configured research thresholds. Positive Net Edge is labeled possible YES
+            underpricing. Negative Net Edge is tracked as possible YES overpricing.
+          </p>
+        </Panel>
+        <Panel title="Paper-Trade Simulation">
+          <p>
+            Nautilus can simulate a hypothetical long-YES paper position for positive-edge signals because the research
+            question is whether Market YES later moved toward the sportsbook-derived benchmark. Negative-edge signals
+            are tracked, but the default simulation does not model short exposure.
+          </p>
+          <p className="mt-3">
+            Paper P&L per $1 payout contract is `future Market YES - entry Market YES`. Return on stake is that paper
+            P&L divided by the entry Market YES price.
+          </p>
+        </Panel>
+        <Panel title="Performance Metrics">
+          <p>
+            Edge closing means the later edge moved closer to zero. Market moved expected direction means Market YES
+            increased after a positive-edge signal. Paper P&L measures only the hypothetical price change in the
+            simulated position.
+          </p>
+        </Panel>
+        <Panel title="Backtest Limitations">
+          <p>
+            Historical data may be sparse, displayed prices may not have been available at meaningful size, and
+            fees, spreads, liquidity, stale data, settlement differences, and sportsbook benchmark error can materially
+            change results. Nautilus does not simulate execution or slippage yet.
           </p>
         </Panel>
       </section>

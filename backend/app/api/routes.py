@@ -10,7 +10,9 @@ from app.models import (
     AlertRule,
     FairValueSnapshot,
     Market,
+    PaperTradeSignal,
     PredictionMarketSnapshot,
+    SignalBacktestResult,
     SportsbookEvent,
     SportsbookOddsSnapshot,
     UserModel,
@@ -25,6 +27,9 @@ from app.schemas import (
     MarketOut,
     OpportunityHistoryRow,
     OpportunityScannerOut,
+    SignalPerformanceBucket,
+    SignalPerformanceRow,
+    SignalPerformanceSummary,
     UserModelCreate,
     UserModelOut,
 )
@@ -380,6 +385,120 @@ def latest_fair_values(
 ) -> list[FairValueSnapshot]:
     stmt = _latest_fair_value_query().order_by(FairValueSnapshot.observed_at.desc()).limit(limit)
     return list(db.scalars(stmt))
+
+
+@router.get("/signals/performance", response_model=SignalPerformanceSummary)
+def signal_performance(db: Session = Depends(get_db)) -> SignalPerformanceSummary:
+    rows = _signal_result_rows(db)
+    return SignalPerformanceSummary(
+        **_aggregate_rows(rows),
+        by_horizon=_bucket_rows(rows, lambda row: row["horizon"]),
+        by_confidence_bucket=_bucket_rows(rows, lambda row: _confidence_bucket(row["confidence_score"])),
+        by_market_type=_bucket_rows(rows, lambda row: row["market_type"]),
+        by_league=_bucket_rows(rows, lambda row: row["league"] or "Unknown"),
+    )
+
+
+@router.get("/signals/performance/signals", response_model=list[SignalPerformanceRow])
+def signal_performance_rows(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> list[SignalPerformanceRow]:
+    return [_signal_row(row) for row in _signal_result_rows(db, limit=limit)]
+
+
+@router.get("/signals/performance/{market_id}", response_model=list[SignalPerformanceRow])
+def signal_performance_for_market(
+    market_id: str,
+    db: Session = Depends(get_db),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> list[SignalPerformanceRow]:
+    return [_signal_row(row) for row in _signal_result_rows(db, market_id=market_id, limit=limit)]
+
+
+def _signal_result_rows(db: Session, market_id: str | None = None, limit: int | None = None) -> list[dict]:
+    stmt = (
+        select(PaperTradeSignal, SignalBacktestResult)
+        .join(SignalBacktestResult, SignalBacktestResult.signal_id == PaperTradeSignal.id)
+        .order_by(PaperTradeSignal.timestamp.desc(), SignalBacktestResult.horizon.asc())
+    )
+    if market_id:
+        stmt = stmt.where(PaperTradeSignal.market_id == market_id)
+    if limit:
+        stmt = stmt.limit(limit)
+    rows: list[dict] = []
+    for signal, result in db.execute(stmt).all():
+        rows.append(
+            {
+                "signal_id": signal.id,
+                "market_id": signal.market_id,
+                "timestamp": signal.timestamp,
+                "title": signal.title,
+                "display_outcome": signal.display_outcome,
+                "market_type": signal.market_type,
+                "league": signal.league,
+                "direction": signal.direction,
+                "entry_market_yes_probability": signal.entry_market_yes_probability,
+                "entry_sportsbook_fair_probability": signal.entry_sportsbook_fair_probability,
+                "entry_net_edge": signal.entry_net_edge,
+                "confidence_score": signal.confidence_score,
+                "horizon": result.horizon,
+                "exit_market_yes_probability": result.exit_market_yes_probability,
+                "paper_pnl_per_contract": result.paper_pnl_per_contract,
+                "return_on_stake": result.return_on_stake,
+                "did_edge_close": result.did_edge_close,
+                "moved_expected_direction": result.moved_expected_direction,
+                "skip_reason": result.skip_reason,
+            }
+        )
+    return rows
+
+
+def _signal_row(row: dict) -> SignalPerformanceRow:
+    return SignalPerformanceRow(**row)
+
+
+def _bucket_rows(rows: list[dict], key_fn) -> list[SignalPerformanceBucket]:
+    buckets: dict[str, list[dict]] = {}
+    for row in rows:
+        buckets.setdefault(str(key_fn(row)), []).append(row)
+    return [SignalPerformanceBucket(key=key, **_aggregate_rows(values)) for key, values in sorted(buckets.items())]
+
+
+def _aggregate_rows(rows: list[dict]) -> dict:
+    total_signals = len({row["signal_id"] for row in rows})
+    evaluated = [row for row in rows if row["paper_pnl_per_contract"] is not None]
+    edge_closed = [row for row in evaluated if row["did_edge_close"] is not None]
+    directional = [row for row in evaluated if row["moved_expected_direction"] is not None]
+    return {
+        "total_signals": total_signals,
+        "evaluated_signals": len(evaluated),
+        "average_entry_edge": _avg([row["entry_net_edge"] for row in rows]),
+        "average_paper_pnl_per_contract": _avg([row["paper_pnl_per_contract"] for row in evaluated]),
+        "average_return_on_stake": _avg([row["return_on_stake"] for row in evaluated]),
+        "edge_close_rate": _rate([row["did_edge_close"] for row in edge_closed]),
+        "directional_accuracy": _rate([row["moved_expected_direction"] for row in directional]),
+    }
+
+
+def _avg(values: list[float | None]) -> float | None:
+    numbers = [float(value) for value in values if value is not None]
+    return sum(numbers) / len(numbers) if numbers else None
+
+
+def _rate(values: list[bool | None]) -> float | None:
+    booleans = [bool(value) for value in values if value is not None]
+    return sum(1 for value in booleans if value) / len(booleans) if booleans else None
+
+
+def _confidence_bucket(value: float) -> str:
+    if value >= 0.95:
+        return "0.95+"
+    if value >= 0.90:
+        return "0.90-0.95"
+    if value >= 0.85:
+        return "0.85-0.90"
+    return "<0.85"
 
 
 @router.post("/user-models", response_model=UserModelOut, status_code=201)
