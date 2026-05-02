@@ -127,14 +127,29 @@ class SignalPerformanceBucket(BaseModel):
     simulated_long_yes_signals: int = 0
     evaluated_long_yes_signals: int = 0
     tracked_negative_edge_signals: int = 0
+    simulated_negative_edge_signals: int = 0
+    evaluated_negative_edge_signals: int = 0
     unevaluated_signals: int = 0
     suspicious_invalid_signals: int = 0
     skipped_invalid_signals: int = 0
     average_entry_edge: float | None = None
     average_paper_pnl_per_contract: float | None = None
     average_return_on_stake: float | None = None
+    yes_side_average_paper_pnl_per_contract: float | None = None
+    yes_side_average_return_on_stake: float | None = None
+    no_side_average_paper_pnl_per_contract: float | None = None
+    no_side_average_return_on_stake: float | None = None
     edge_close_rate: float | None = None
     directional_accuracy: float | None = None
+    market_driven_close_rate: float | None = None
+    fair_value_driven_close_rate: float | None = None
+    both_moved_close_rate: float | None = None
+    edge_widened_rate: float | None = None
+    no_meaningful_change_rate: float | None = None
+    average_market_yes_change: float | None = None
+    average_sportsbook_fair_change: float | None = None
+    average_edge_change: float | None = None
+    average_absolute_edge_change: float | None = None
     contains_unadjusted_liquidity: bool = False
 
 
@@ -144,14 +159,29 @@ class SignalPerformanceSummary(BaseModel):
     simulated_long_yes_signals: int = 0
     evaluated_long_yes_signals: int = 0
     tracked_negative_edge_signals: int = 0
+    simulated_negative_edge_signals: int = 0
+    evaluated_negative_edge_signals: int = 0
     unevaluated_signals: int = 0
     suspicious_invalid_signals: int = 0
     skipped_invalid_signals: int = 0
     average_entry_edge: float | None = None
     average_paper_pnl_per_contract: float | None = None
     average_return_on_stake: float | None = None
+    yes_side_average_paper_pnl_per_contract: float | None = None
+    yes_side_average_return_on_stake: float | None = None
+    no_side_average_paper_pnl_per_contract: float | None = None
+    no_side_average_return_on_stake: float | None = None
     edge_close_rate: float | None = None
     directional_accuracy: float | None = None
+    market_driven_close_rate: float | None = None
+    fair_value_driven_close_rate: float | None = None
+    both_moved_close_rate: float | None = None
+    edge_widened_rate: float | None = None
+    no_meaningful_change_rate: float | None = None
+    average_market_yes_change: float | None = None
+    average_sportsbook_fair_change: float | None = None
+    average_edge_change: float | None = None
+    average_absolute_edge_change: float | None = None
     contains_unadjusted_liquidity: bool = False
     by_horizon: list[SignalPerformanceBucket] = Field(default_factory=list)
     by_confidence_bucket: list[SignalPerformanceBucket] = Field(default_factory=list)
@@ -168,11 +198,22 @@ class SignalPerformanceRow(BaseModel):
     market_type: str
     league: str | None = None
     direction: str
+    signal_direction: str | None = None
+    paper_side: str | None = None
+    entry_price: float | None = None
+    exit_price: float | None = None
     entry_market_yes_probability: float
     entry_sportsbook_fair_probability: float
     entry_net_edge: float | None = None
     horizon: str
     exit_market_yes_probability: float | None = None
+    exit_sportsbook_fair_probability: float | None = None
+    exit_net_edge: float | None = None
+    market_yes_change: float | None = None
+    sportsbook_fair_change: float | None = None
+    edge_change: float | None = None
+    absolute_edge_change: float | None = None
+    closure_reason: str | None = None
     paper_pnl_per_contract: float | None = None
     return_on_stake: float | None = None
     did_edge_close: bool | None = None

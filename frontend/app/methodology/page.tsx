@@ -78,19 +78,22 @@ export default function MethodologyPage() {
         <Panel title="Paper-Trade Simulation">
           <p>
             Nautilus can simulate a hypothetical long-YES paper position for positive-edge signals because the research
-            question is whether Market YES later moved toward the sportsbook-derived benchmark. Negative-edge signals
-            are tracked, but the default simulation does not model short exposure.
+            question is whether Market YES later moved toward the sportsbook-derived benchmark. For negative-edge
+            signals, Nautilus can optionally simulate a hypothetical NO-side paper position when the backtest is run
+            with negative-edge simulation enabled.
           </p>
           <p className="mt-3">
-            Paper P&L per $1 payout contract is `future Market YES - entry Market YES`. Return on stake is that paper
-            P&L divided by the entry Market YES price.
+            YES-side paper P&L per $1 payout contract is `future Market YES - entry Market YES`. NO-side paper P&L is
+            `(1 - future Market YES) - (1 - entry Market YES)`, which is equivalent to `entry Market YES - future
+            Market YES`. Return on stake divides paper P&L by the corresponding YES-side or NO-side entry price.
           </p>
         </Panel>
         <Panel title="Performance Metrics">
           <p>
-            Edge closing means the later edge moved closer to zero. Market moved expected direction means Market YES
-            increased after a positive-edge signal. Paper P&L measures only the hypothetical price change in the
-            simulated position.
+            Edge closing means the later edge moved closer to zero. For positive-edge YES-side simulations, expected
+            direction means Market YES increased. For optional negative-edge NO-side simulations, expected direction
+            means Market YES decreased. Paper P&L measures only the hypothetical price change in the simulated paper
+            side.
           </p>
         </Panel>
         <Panel title="Backtest Limitations">

@@ -12,14 +12,29 @@ const emptySummary: SignalPerformanceSummary = {
   simulated_long_yes_signals: 0,
   evaluated_long_yes_signals: 0,
   tracked_negative_edge_signals: 0,
+  simulated_negative_edge_signals: 0,
+  evaluated_negative_edge_signals: 0,
   unevaluated_signals: 0,
   suspicious_invalid_signals: 0,
   skipped_invalid_signals: 0,
   average_entry_edge: null,
   average_paper_pnl_per_contract: null,
   average_return_on_stake: null,
+  yes_side_average_paper_pnl_per_contract: null,
+  yes_side_average_return_on_stake: null,
+  no_side_average_paper_pnl_per_contract: null,
+  no_side_average_return_on_stake: null,
   edge_close_rate: null,
   directional_accuracy: null,
+  market_driven_close_rate: null,
+  fair_value_driven_close_rate: null,
+  both_moved_close_rate: null,
+  edge_widened_rate: null,
+  no_meaningful_change_rate: null,
+  average_market_yes_change: null,
+  average_sportsbook_fair_change: null,
+  average_edge_change: null,
+  average_absolute_edge_change: null,
   contains_unadjusted_liquidity: false,
   by_horizon: [],
   by_confidence_bucket: [],
@@ -37,6 +52,7 @@ export function PerformanceDashboard() {
   const [horizonFilter, setHorizonFilter] = useState("all");
   const [marketTypeFilter, setMarketTypeFilter] = useState("all");
   const [leagueFilter, setLeagueFilter] = useState("all");
+  const [paperSideFilter, setPaperSideFilter] = useState("all");
   const [minConfidence, setMinConfidence] = useState(0);
   const [hideSuspicious, setHideSuspicious] = useState(true);
 
@@ -103,19 +119,44 @@ export function PerformanceDashboard() {
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <Metric label="Total signals" value={String(summary.total_signals)} />
-        <Metric label="Simulated long YES" value={String(summary.simulated_long_yes_signals)} />
-        <Metric label="Evaluated long YES" value={String(summary.evaluated_long_yes_signals)} />
-        <Metric label="Tracked negative" value={String(summary.tracked_negative_edge_signals)} />
+        <Metric label="Simulated YES" value={String(summary.simulated_long_yes_signals)} />
+        <Metric label="Evaluated YES" value={String(summary.evaluated_long_yes_signals)} />
+        <Metric label="Simulated NO-side" value={String(summary.simulated_negative_edge_signals)} />
+        <Metric label="Evaluated NO-side" value={String(summary.evaluated_negative_edge_signals)} />
+        <Metric label="Tracked negative only" value={String(summary.tracked_negative_edge_signals)} />
         <Metric label="Unevaluated" value={String(summary.unevaluated_signals)} />
         <Metric label="Suspicious/invalid" value={String(summary.suspicious_invalid_signals)} />
-        <Metric label="Edge close rate" value={formatPercent(summary.edge_close_rate)} />
-        <Metric label="Directional accuracy" value={formatPercent(summary.directional_accuracy)} />
-        <Metric label="Avg P&L / contract" value={formatSignedCurrency(summary.average_paper_pnl_per_contract)} />
-        <Metric label="Avg return" value={formatSignedPercent(summary.average_return_on_stake)} />
+        <Metric label="All sim. edge close" value={formatPercent(summary.edge_close_rate)} />
+        <Metric label="All sim. direction" value={formatPercent(summary.directional_accuracy)} />
+        <Metric label="All sim. avg P&L" value={formatSignedCurrency(summary.average_paper_pnl_per_contract)} />
+        <Metric label="All sim. avg return" value={formatSignedPercent(summary.average_return_on_stake)} />
+        <Metric label="YES avg P&L" value={formatSignedCurrency(summary.yes_side_average_paper_pnl_per_contract)} />
+        <Metric label="NO-side avg P&L" value={formatSignedCurrency(summary.no_side_average_paper_pnl_per_contract)} />
+      </section>
+
+      <section className="space-y-4 border border-line bg-ink/70 p-5">
+        <div>
+          <div className="text-xs uppercase tracking-[0.18em] text-steel">Closure Attribution</div>
+          <p className="mt-2 max-w-5xl text-sm leading-6 text-steel">
+            If Market YES rises toward Sportsbook Fair, that supports the original long-YES signal idea. If Sportsbook
+            Fair falls toward Market YES, prediction markets may have been leading sportsbooks. If edge widens, the
+            pricing disagreement increased. Negative-edge simulations use a hypothetical NO-side paper simulation:
+            Market YES decreasing is the expected paper direction. This is research analytics, not a recommendation.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <Metric label="Market-driven close" value={formatPercent(summary.market_driven_close_rate)} />
+          <Metric label="Sportsbook-fair close" value={formatPercent(summary.fair_value_driven_close_rate)} />
+          <Metric label="Both moved" value={formatPercent(summary.both_moved_close_rate)} />
+          <Metric label="Edge widened" value={formatPercent(summary.edge_widened_rate)} />
+          <Metric label="Avg Market YES Δ" value={formatSignedPercent(summary.average_market_yes_change)} />
+          <Metric label="Avg Fair Δ" value={formatSignedPercent(summary.average_sportsbook_fair_change)} />
+        </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
         <BucketTable title="Horizon Results" rows={summary.by_horizon} />
+        <AttributionTable title="Closure Attribution by Horizon" rows={summary.by_horizon} />
         <BucketTable title="Confidence Buckets" rows={summary.by_confidence_bucket} />
         <BucketTable title="By Market Type" rows={summary.by_market_type} />
         <BucketTable title="By League" rows={summary.by_league} />
@@ -133,13 +174,15 @@ export function PerformanceDashboard() {
         setMarketTypeFilter={setMarketTypeFilter}
         leagueFilter={leagueFilter}
         setLeagueFilter={setLeagueFilter}
+        paperSideFilter={paperSideFilter}
+        setPaperSideFilter={setPaperSideFilter}
         minConfidence={minConfidence}
         setMinConfidence={setMinConfidence}
         hideSuspicious={hideSuspicious}
         setHideSuspicious={setHideSuspicious}
       />
 
-      <SignalTable rows={filterRows(signals, { directionFilter, statusFilter, horizonFilter, marketTypeFilter, leagueFilter, minConfidence, hideSuspicious })} loading={loading} />
+      <SignalTable rows={filterRows(signals, { directionFilter, statusFilter, horizonFilter, marketTypeFilter, leagueFilter, paperSideFilter, minConfidence, hideSuspicious })} loading={loading} />
     </div>
   );
 }
@@ -156,6 +199,8 @@ function SignalFilters({
   setMarketTypeFilter,
   leagueFilter,
   setLeagueFilter,
+  paperSideFilter,
+  setPaperSideFilter,
   minConfidence,
   setMinConfidence,
   hideSuspicious,
@@ -172,6 +217,8 @@ function SignalFilters({
   setMarketTypeFilter: (value: string) => void;
   leagueFilter: string;
   setLeagueFilter: (value: string) => void;
+  paperSideFilter: string;
+  setPaperSideFilter: (value: string) => void;
   minConfidence: number;
   setMinConfidence: (value: number) => void;
   hideSuspicious: boolean;
@@ -181,14 +228,16 @@ function SignalFilters({
   const horizons = unique(rows.map((row) => row.horizon));
   const marketTypes = unique(rows.map((row) => row.market_type));
   const leagues = unique(rows.map((row) => row.league ?? "Unknown"));
+  const paperSides = unique(rows.map((row) => row.paper_side ?? "None"));
 
   return (
-    <section className="grid gap-3 border border-line bg-ink/70 p-4 md:grid-cols-3 xl:grid-cols-7">
+    <section className="grid gap-3 border border-line bg-ink/70 p-4 md:grid-cols-3 xl:grid-cols-8">
       <Select label="Direction" value={directionFilter} onChange={setDirectionFilter} options={["all", "positive", "negative"]} />
       <Select label="Status" value={statusFilter} onChange={setStatusFilter} options={["all", ...statuses]} />
       <Select label="Horizon" value={horizonFilter} onChange={setHorizonFilter} options={["all", ...horizons]} />
       <Select label="Market type" value={marketTypeFilter} onChange={setMarketTypeFilter} options={["all", ...marketTypes]} />
       <Select label="League" value={leagueFilter} onChange={setLeagueFilter} options={["all", ...leagues]} />
+      <Select label="Paper side" value={paperSideFilter} onChange={setPaperSideFilter} options={["all", ...paperSides]} />
       <label className="space-y-1 text-xs uppercase tracking-[0.12em] text-steel">
         <span>Min confidence</span>
         <input
@@ -273,6 +322,44 @@ function BucketTable({ title, rows }: { title: string; rows: SignalPerformanceBu
   );
 }
 
+function AttributionTable({ title, rows }: { title: string; rows: SignalPerformanceBucket[] }) {
+  return (
+    <div className="border border-line bg-ink/70 p-4">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.16em] text-steel">{title}</h2>
+      <table className="w-full text-sm">
+        <thead className="border-b border-line text-xs uppercase tracking-[0.12em] text-steel">
+          <tr>
+            <th className="py-2 text-left font-medium">Group</th>
+            <th className="py-2 text-right font-medium">Market</th>
+            <th className="py-2 text-right font-medium">Fair</th>
+            <th className="py-2 text-right font-medium">Both</th>
+            <th className="py-2 text-right font-medium">Widened</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="py-5 text-center text-steel">
+                No evaluated attribution rows yet.
+              </td>
+            </tr>
+          ) : (
+            rows.map((row) => (
+              <tr key={row.key} className="border-b border-line/70">
+                <td className="py-2 text-white">{row.key}</td>
+                <td className="py-2 text-right font-mono">{formatPercent(row.market_driven_close_rate)}</td>
+                <td className="py-2 text-right font-mono">{formatPercent(row.fair_value_driven_close_rate)}</td>
+                <td className="py-2 text-right font-mono">{formatPercent(row.both_moved_close_rate)}</td>
+                <td className="py-2 text-right font-mono">{formatPercent(row.edge_widened_rate)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading: boolean }) {
   return (
     <section className="overflow-hidden border border-line bg-ink/70">
@@ -280,7 +367,7 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
         Signal Rows
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-[1680px] w-full text-sm">
+        <table className="min-w-[2280px] w-full text-sm">
           <thead className="border-b border-line text-xs uppercase tracking-[0.12em] text-steel">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Timestamp</th>
@@ -292,10 +379,16 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
               <th className="px-4 py-3 text-right font-medium">Raw side</th>
               <th className="px-4 py-3 text-right font-medium">Raw price</th>
               <th className="px-4 py-3 text-right font-medium">Derived YES</th>
+              <th className="px-4 py-3 text-right font-medium">Paper side</th>
+              <th className="px-4 py-3 text-right font-medium">Entry price</th>
+              <th className="px-4 py-3 text-right font-medium">Exit price</th>
               <th className="px-4 py-3 text-right font-medium">Horizon</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-right font-medium">Paper P&L</th>
               <th className="px-4 py-3 text-right font-medium">Return</th>
+              <th className="px-4 py-3 text-right font-medium">Market YES Δ</th>
+              <th className="px-4 py-3 text-right font-medium">Fair Δ</th>
+              <th className="px-4 py-3 text-left font-medium">Closure</th>
               <th className="px-4 py-3 text-right font-medium">Direction</th>
               <th className="px-4 py-3 text-right font-medium">Edge closed</th>
               <th className="px-4 py-3 text-right font-medium">Confidence</th>
@@ -304,7 +397,7 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={16} className="px-4 py-8 text-center text-steel">
+                <td colSpan={22} className="px-4 py-8 text-center text-steel">
                   {loading ? "Loading historical signal performance..." : "No historical paper-trade simulation rows yet."}
                 </td>
               </tr>
@@ -320,10 +413,16 @@ function SignalTable({ rows, loading }: { rows: SignalPerformanceRow[]; loading:
                   <td className="px-4 py-3 text-right font-mono">{row.raw_outcome_side ?? "n/a"}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatPercent(row.raw_historical_price)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatPercent(row.derived_market_yes_probability)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{row.paper_side ?? "n/a"}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.entry_price)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatPercent(row.exit_price)}</td>
                   <td className="px-4 py-3 text-right font-mono">{row.horizon}</td>
                   <td className="px-4 py-3 text-steel" title={row.suspicion_reason ?? row.skip_reason ?? undefined}>{formatStatus(row.evaluation_status, row.skip_reason)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatSignedCurrency(row.paper_pnl_per_contract)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatSignedPercent(row.return_on_stake)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatSignedPercent(row.market_yes_change)}</td>
+                  <td className="px-4 py-3 text-right font-mono">{formatSignedPercent(row.sportsbook_fair_change)}</td>
+                  <td className="px-4 py-3 text-steel">{formatClosureReason(row.closure_reason)}</td>
                   <td className="px-4 py-3 text-right">{formatBoolean(row.moved_expected_direction)}</td>
                   <td className="px-4 py-3 text-right">{formatBoolean(row.did_edge_close)}</td>
                   <td className="px-4 py-3 text-right font-mono">{formatPercent(row.confidence_score)}</td>
@@ -362,9 +461,22 @@ function formatStatus(status: string, skipReason: string | null): string {
     missing_future_fair: "Missing future fair",
     invalid_probability: "Invalid probability",
     negative_edge_no_long_simulation: "No long-YES simulation",
-    suspicious_probability_orientation: "Suspicious orientation"
+    suspicious_probability_orientation: "Suspicious orientation",
+    negative_edge_no_side_simulated: "NO-side simulation",
+    unevaluated_negative_edge_no_side: "Unevaluated NO-side"
   };
   return labels[status] ?? skipReason ?? status;
+}
+
+function formatClosureReason(reason: string | null): string {
+  const labels: Record<string, string> = {
+    market_moved_expected_direction: "Market YES moved",
+    fair_moved_toward_market: "Sportsbook Fair moved",
+    both_moved_toward_each_other: "Both moved",
+    edge_widened: "Edge widened",
+    no_meaningful_change: "No meaningful change"
+  };
+  return reason ? labels[reason] ?? reason : "n/a";
 }
 
 function unique(values: string[]): string[] {
@@ -379,6 +491,7 @@ function filterRows(
     horizonFilter: string;
     marketTypeFilter: string;
     leagueFilter: string;
+    paperSideFilter: string;
     minConfidence: number;
     hideSuspicious: boolean;
   }
@@ -391,6 +504,7 @@ function filterRows(
     if (filters.horizonFilter !== "all" && row.horizon !== filters.horizonFilter) return false;
     if (filters.marketTypeFilter !== "all" && row.market_type !== filters.marketTypeFilter) return false;
     if (filters.leagueFilter !== "all" && (row.league ?? "Unknown") !== filters.leagueFilter) return false;
+    if (filters.paperSideFilter !== "all" && (row.paper_side ?? "None") !== filters.paperSideFilter) return false;
     if (row.confidence_score < filters.minConfidence) return false;
     return true;
   });

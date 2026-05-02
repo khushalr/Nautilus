@@ -7,6 +7,7 @@ import pytest
 from app.models import HistoricalPredictionMarketPriceSnapshot, HistoricalSportsbookOddsSnapshot, Market
 from app.api.routes import _aggregate_rows
 from app.services.backtesting import (
+    classify_closure_reason,
     detect_signal,
     estimate_historical_odds_credits,
     evaluate_paper_long_yes,
@@ -115,6 +116,24 @@ def test_paper_long_yes_pnl_and_return_on_stake() -> None:
     assert evaluation.return_on_stake == pytest.approx(0.15)
 
 
+def test_paper_long_yes_records_closure_attribution() -> None:
+    evaluation = evaluate_paper_long_yes(
+        entry_price=0.40,
+        exit_price=0.44,
+        entry_edge=0.10,
+        exit_edge=0.04,
+        horizon="1h",
+        exit_timestamp=datetime(2026, 1, 1, 13, tzinfo=UTC),
+        entry_sportsbook_fair=0.50,
+    )
+
+    assert evaluation.market_yes_change == pytest.approx(0.04)
+    assert evaluation.sportsbook_fair_change == pytest.approx(-0.02)
+    assert evaluation.edge_change == pytest.approx(-0.06)
+    assert evaluation.absolute_edge_change == pytest.approx(-0.06)
+    assert evaluation.closure_reason == "both_moved_toward_each_other"
+
+
 def test_edge_close_and_directional_accuracy_calculation() -> None:
     evaluation = evaluate_paper_long_yes(
         entry_price=0.40,
@@ -127,6 +146,94 @@ def test_edge_close_and_directional_accuracy_calculation() -> None:
 
     assert evaluation.did_edge_close is True
     assert evaluation.moved_expected_direction is True
+
+
+def test_negative_edge_no_side_pnl_and_directional_accuracy() -> None:
+    evaluation = evaluate_paper_long_yes(
+        entry_price=0.60,
+        exit_price=0.54,
+        entry_edge=-0.08,
+        exit_edge=-0.02,
+        horizon="1h",
+        exit_timestamp=datetime(2026, 1, 1, 13, tzinfo=UTC),
+        entry_sportsbook_fair=0.52,
+        signal_direction="negative_edge_no_side",
+        paper_side="NO",
+    )
+
+    assert evaluation.paper_side == "NO"
+    assert evaluation.entry_price == pytest.approx(0.40)
+    assert evaluation.exit_price == pytest.approx(0.46)
+    assert evaluation.paper_pnl_per_contract == pytest.approx(0.06)
+    assert evaluation.return_on_stake == pytest.approx(0.15)
+    assert evaluation.moved_expected_direction is True
+
+
+def test_negative_edge_closure_reason_both_move_toward_each_other() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.60,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.57,
+        exit_sportsbook_fair=0.53,
+        signal_direction="negative_edge_no_side",
+    )
+
+    assert reason == "both_moved_toward_each_other"
+
+
+def test_closure_reason_market_yes_rises_with_fair_unchanged() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.40,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.43,
+        exit_sportsbook_fair=0.50,
+    )
+
+    assert reason == "market_moved_expected_direction"
+
+
+def test_closure_reason_fair_falls_with_market_unchanged() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.40,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.40,
+        exit_sportsbook_fair=0.47,
+    )
+
+    assert reason == "fair_moved_toward_market"
+
+
+def test_closure_reason_both_move_toward_each_other() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.40,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.43,
+        exit_sportsbook_fair=0.47,
+    )
+
+    assert reason == "both_moved_toward_each_other"
+
+
+def test_closure_reason_edge_widened() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.40,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.39,
+        exit_sportsbook_fair=0.52,
+    )
+
+    assert reason == "edge_widened"
+
+
+def test_closure_reason_tiny_moves_are_noise() -> None:
+    reason = classify_closure_reason(
+        entry_market_yes=0.40,
+        entry_sportsbook_fair=0.50,
+        exit_market_yes=0.4005,
+        exit_sportsbook_fair=0.4996,
+    )
+
+    assert reason == "no_meaningful_change"
 
 
 def test_missing_historical_polymarket_price_skip(db_session) -> None:
@@ -414,6 +521,27 @@ def test_negative_edge_does_not_simulate_long_yes_by_default(db_session) -> None
     assert one_hour.evaluation_status == "negative_edge_no_long_simulation"
 
 
+def test_negative_edge_simulates_no_side_when_enabled(db_session) -> None:
+    market, timestamp = _entry_setup(db_session, entry_price=0.80)
+    db_session.add(_price(market.id, timestamp + timedelta(hours=1), raw_price=0.72, liquidity=75000))
+    db_session.commit()
+    edge = reconstruct_historical_edge(db_session, market, timestamp, config=_loose_config())
+
+    evaluations = evaluate_signal_horizons(
+        db_session,
+        edge,
+        "possible_yes_overpricing",
+        config={**_loose_config(), "simulate_negative_edge": True},
+    )
+
+    one_hour = next(result for result in evaluations if result.horizon == "1h")
+    assert one_hour.paper_side == "NO"
+    assert one_hour.entry_price == pytest.approx(0.20)
+    assert one_hour.exit_price == pytest.approx(0.28)
+    assert one_hour.paper_pnl_per_contract == pytest.approx(0.08)
+    assert one_hour.moved_expected_direction is True
+
+
 def test_performance_aggregate_counts_total_evaluated_unevaluated_and_invalid() -> None:
     rows = [
         {"signal_id": "a", "paper_pnl_per_contract": 0.02, "did_edge_close": True, "moved_expected_direction": True, "entry_net_edge": 0.03, "return_on_stake": 0.1, "liquidity_adjusted": True, "evaluation_status": "evaluated", "skip_reason": None, "signal_category": "positive_edge_long_yes_simulated"},
@@ -435,6 +563,63 @@ def test_performance_aggregate_counts_total_evaluated_unevaluated_and_invalid() 
     assert summary["average_paper_pnl_per_contract"] == pytest.approx(0.02)
 
 
+def test_performance_aggregate_computes_closure_attribution_rates() -> None:
+    rows = [
+        _aggregate_attribution_row("a", "market_moved_expected_direction", market_delta=0.03, fair_delta=0.0, edge_delta=-0.03, absolute_delta=-0.03),
+        _aggregate_attribution_row("b", "fair_moved_toward_market", market_delta=0.0, fair_delta=-0.04, edge_delta=-0.04, absolute_delta=-0.04),
+        _aggregate_attribution_row("c", "both_moved_toward_each_other", market_delta=0.02, fair_delta=-0.02, edge_delta=-0.04, absolute_delta=-0.04),
+        _aggregate_attribution_row("d", "edge_widened", market_delta=-0.01, fair_delta=0.02, edge_delta=0.03, absolute_delta=0.03),
+    ]
+
+    summary = _aggregate_rows(rows)
+
+    assert summary["market_driven_close_rate"] == pytest.approx(0.25)
+    assert summary["fair_value_driven_close_rate"] == pytest.approx(0.25)
+    assert summary["both_moved_close_rate"] == pytest.approx(0.25)
+    assert summary["edge_widened_rate"] == pytest.approx(0.25)
+    assert summary["average_market_yes_change"] == pytest.approx(0.01)
+    assert summary["average_sportsbook_fair_change"] == pytest.approx(-0.01)
+    assert summary["average_edge_change"] == pytest.approx(-0.02)
+    assert summary["average_absolute_edge_change"] == pytest.approx(-0.02)
+
+
+def test_performance_aggregate_counts_negative_edge_no_side_simulations() -> None:
+    rows = [
+        _aggregate_attribution_row("yes", "market_moved_expected_direction", market_delta=0.03, fair_delta=0, edge_delta=-0.03, absolute_delta=-0.03),
+        {
+            **_aggregate_attribution_row("no", "market_moved_expected_direction", market_delta=-0.04, fair_delta=0, edge_delta=0.04, absolute_delta=-0.04),
+            "entry_net_edge": -0.05,
+            "paper_side": "NO",
+            "signal_category": "negative_edge_no_side_simulated",
+            "paper_pnl_per_contract": 0.04,
+            "return_on_stake": 0.1,
+        },
+        {
+            "signal_id": "tracked",
+            "paper_pnl_per_contract": None,
+            "did_edge_close": None,
+            "moved_expected_direction": None,
+            "entry_net_edge": -0.03,
+            "return_on_stake": None,
+            "liquidity_adjusted": True,
+            "evaluation_status": "negative_edge_no_long_simulation",
+            "skip_reason": "negative_edge_no_long_simulation",
+            "signal_category": "negative_edge_overpricing_tracked_only",
+        },
+    ]
+
+    summary = _aggregate_rows(rows)
+
+    assert summary["evaluated_signals"] == 2
+    assert summary["evaluated_long_yes_signals"] == 1
+    assert summary["tracked_negative_edge_signals"] == 1
+    assert summary["simulated_negative_edge_signals"] == 1
+    assert summary["evaluated_negative_edge_signals"] == 1
+    assert summary["average_paper_pnl_per_contract"] == pytest.approx(0.025)
+    assert summary["yes_side_average_paper_pnl_per_contract"] == pytest.approx(0.01)
+    assert summary["no_side_average_paper_pnl_per_contract"] == pytest.approx(0.04)
+
+
 def test_quota_cost_estimation_and_yes_guard_inputs() -> None:
     estimate = estimate_historical_odds_credits(
         date_start=datetime(2026, 1, 1, tzinfo=UTC),
@@ -445,6 +630,35 @@ def test_quota_cost_estimation_and_yes_guard_inputs() -> None:
     )
 
     assert estimate == 8
+
+
+def _aggregate_attribution_row(
+    signal_id: str,
+    closure_reason: str,
+    *,
+    market_delta: float,
+    fair_delta: float,
+    edge_delta: float,
+    absolute_delta: float,
+) -> dict:
+    return {
+        "signal_id": signal_id,
+        "paper_pnl_per_contract": 0.01,
+        "did_edge_close": closure_reason != "edge_widened",
+        "moved_expected_direction": market_delta > 0,
+        "entry_net_edge": 0.05,
+        "return_on_stake": 0.02,
+        "liquidity_adjusted": True,
+        "evaluation_status": "evaluated",
+        "skip_reason": None,
+        "signal_category": "positive_edge_long_yes_simulated",
+        "paper_side": "YES",
+        "closure_reason": closure_reason,
+        "market_yes_change": market_delta,
+        "sportsbook_fair_change": fair_delta,
+        "edge_change": edge_delta,
+        "absolute_edge_change": absolute_delta,
+    }
 
 
 def _entry_setup(db_session, entry_price: float) -> tuple[Market, datetime]:

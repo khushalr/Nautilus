@@ -50,6 +50,8 @@ DEFAULT_BACKTEST_CONFIG: dict[str, float | bool] = {
     "allow_missing_future_fair": True,
 }
 
+DEFAULT_MEANINGFUL_MOVEMENT = 0.001
+
 
 @dataclass(frozen=True)
 class HistoricalEdge:
@@ -89,8 +91,16 @@ class PaperTradeEvaluation:
     paper_pnl_per_contract: float | None
     return_on_stake: float | None
     edge_change: float | None
-    did_edge_close: bool | None
-    moved_expected_direction: bool | None
+    signal_direction: str | None = None
+    paper_side: str | None = None
+    entry_price: float | None = None
+    exit_price: float | None = None
+    absolute_edge_change: float | None = None
+    market_yes_change: float | None = None
+    sportsbook_fair_change: float | None = None
+    closure_reason: str | None = None
+    did_edge_close: bool | None = None
+    moved_expected_direction: bool | None = None
     skip_reason: str | None = None
     evaluation_status: str = "evaluated"
 
@@ -162,7 +172,12 @@ def evaluate_paper_long_yes(
     horizon: str,
     exit_timestamp: datetime | None,
     edge_close_threshold: float = 0.005,
+    entry_sportsbook_fair: float | None = None,
+    movement_threshold: float = DEFAULT_MEANINGFUL_MOVEMENT,
+    signal_direction: str = "positive_edge_long_yes",
+    paper_side: str = "YES",
 ) -> PaperTradeEvaluation:
+    normalized_side = paper_side.upper()
     if not _valid_probability(entry_price) or (exit_price is not None and not _valid_probability(exit_price)):
         return PaperTradeEvaluation(
             horizon=horizon,
@@ -173,6 +188,14 @@ def evaluate_paper_long_yes(
             paper_pnl_per_contract=None,
             return_on_stake=None,
             edge_change=None,
+            signal_direction=signal_direction,
+            paper_side=normalized_side,
+            entry_price=_paper_price(entry_price, normalized_side) if _valid_probability(entry_price) else None,
+            exit_price=_paper_price(exit_price, normalized_side) if exit_price is not None and _valid_probability(exit_price) else None,
+            absolute_edge_change=None,
+            market_yes_change=None,
+            sportsbook_fair_change=None,
+            closure_reason=None,
             did_edge_close=None,
             moved_expected_direction=None,
             skip_reason="invalid_probability_range",
@@ -188,28 +211,97 @@ def evaluate_paper_long_yes(
             paper_pnl_per_contract=None,
             return_on_stake=None,
             edge_change=None,
+            signal_direction=signal_direction,
+            paper_side=normalized_side,
+            entry_price=_paper_price(entry_price, normalized_side),
+            exit_price=None,
+            absolute_edge_change=None,
+            market_yes_change=None,
+            sportsbook_fair_change=None,
+            closure_reason=None,
             did_edge_close=None,
             moved_expected_direction=None,
             skip_reason="missing_future_price",
             evaluation_status="missing_future_price",
         )
-    pnl = exit_price - entry_price
-    return_on_stake = pnl / entry_price if entry_price > 0 else None
+    paper_entry_price = _paper_price(entry_price, normalized_side)
+    paper_exit_price = _paper_price(exit_price, normalized_side)
+    pnl = paper_exit_price - paper_entry_price
+    return_on_stake = pnl / paper_entry_price if paper_entry_price > 0 else None
     edge_change = exit_edge - entry_edge if exit_edge is not None else None
+    absolute_edge_change = abs(exit_edge) - abs(entry_edge) if exit_edge is not None else None
+    exit_fair = (exit_price + exit_edge) if exit_edge is not None else None
+    sportsbook_fair_change = (
+        exit_fair - entry_sportsbook_fair
+        if exit_fair is not None and entry_sportsbook_fair is not None
+        else None
+    )
+    closure_reason = classify_closure_reason(
+        entry_market_yes=entry_price,
+        entry_sportsbook_fair=entry_sportsbook_fair,
+        exit_market_yes=exit_price,
+        exit_sportsbook_fair=exit_fair,
+        threshold=movement_threshold,
+        signal_direction=signal_direction,
+    )
     status = "evaluated" if exit_edge is not None else "missing_future_fair"
     return PaperTradeEvaluation(
         horizon=horizon,
         exit_timestamp=exit_timestamp,
         exit_market_yes_probability=exit_price,
-        exit_sportsbook_fair_probability=(exit_price + exit_edge) if exit_edge is not None else None,
+        exit_sportsbook_fair_probability=exit_fair,
         exit_net_edge=exit_edge,
         paper_pnl_per_contract=pnl,
         return_on_stake=return_on_stake,
         edge_change=edge_change,
+        signal_direction=signal_direction,
+        paper_side=normalized_side,
+        entry_price=paper_entry_price,
+        exit_price=paper_exit_price,
+        absolute_edge_change=absolute_edge_change,
+        market_yes_change=exit_price - entry_price,
+        sportsbook_fair_change=sportsbook_fair_change,
+        closure_reason=closure_reason,
         did_edge_close=abs(exit_edge) <= edge_close_threshold if exit_edge is not None else None,
-        moved_expected_direction=exit_price > entry_price,
+        moved_expected_direction=exit_price < entry_price if normalized_side == "NO" else exit_price > entry_price,
         evaluation_status=status,
     )
+
+
+def classify_closure_reason(
+    *,
+    entry_market_yes: float,
+    entry_sportsbook_fair: float | None,
+    exit_market_yes: float,
+    exit_sportsbook_fair: float | None,
+    threshold: float = DEFAULT_MEANINGFUL_MOVEMENT,
+    signal_direction: str = "positive_edge_long_yes",
+) -> str | None:
+    if entry_sportsbook_fair is None or exit_sportsbook_fair is None:
+        return None
+    entry_edge = entry_sportsbook_fair - entry_market_yes
+    exit_edge = exit_sportsbook_fair - exit_market_yes
+    market_yes_change = exit_market_yes - entry_market_yes
+    sportsbook_fair_change = exit_sportsbook_fair - entry_sportsbook_fair
+    if abs(exit_edge) > abs(entry_edge) + threshold:
+        return "edge_widened"
+    if signal_direction == "negative_edge_no_side":
+        market_moved = market_yes_change <= -threshold
+        fair_moved = sportsbook_fair_change >= threshold
+    else:
+        market_moved = market_yes_change >= threshold
+        fair_moved = sportsbook_fair_change <= -threshold
+    if market_moved and fair_moved:
+        return "both_moved_toward_each_other"
+    if market_moved:
+        return "market_moved_expected_direction"
+    if fair_moved:
+        return "fair_moved_toward_market"
+    return "no_meaningful_change"
+
+
+def _paper_price(market_yes_price: float, paper_side: str) -> float:
+    return 1 - market_yes_price if paper_side.upper() == "NO" else market_yes_price
 
 
 def reconstruct_historical_edge(
@@ -566,6 +658,10 @@ def evaluate_signal_horizons(
                     paper_pnl_per_contract=None,
                     return_on_stake=None,
                     edge_change=None,
+                    signal_direction="negative_edge_tracked_only",
+                    paper_side=None,
+                    entry_price=None,
+                    exit_price=None,
                     did_edge_close=None,
                     moved_expected_direction=None,
                     skip_reason="negative_edge_no_long_simulation",
@@ -583,6 +679,7 @@ def evaluate_signal_horizons(
             after=edge.timestamp,
         )
         future_edge = reconstruct_historical_edge(db, edge.market, exit_time, config=config) if future_price else None
+        is_negative_simulation = direction == "possible_yes_overpricing"
         evaluation = evaluate_paper_long_yes(
             entry_price=edge.market_yes_probability,
             exit_price=historical_market_yes_probability(future_price, effective_prediction_market_type(edge.market)) if future_price else None,
@@ -591,6 +688,9 @@ def evaluate_signal_horizons(
             horizon=horizon,
             exit_timestamp=future_price.timestamp if future_price else None,
             edge_close_threshold=float(config["edge_close_threshold"]),
+            entry_sportsbook_fair=edge.sportsbook_fair_probability,
+            signal_direction="negative_edge_no_side" if is_negative_simulation else "positive_edge_long_yes",
+            paper_side="NO" if is_negative_simulation else "YES",
         )
         evaluations.append(evaluation)
     return evaluations
@@ -852,6 +952,14 @@ def _result_from_evaluation(signal: PaperTradeSignal, market_id: str, evaluation
             "liquidity_status": signal.raw_payload.get("liquidity_status") if isinstance(signal.raw_payload, dict) else None,
             "liquidity_adjusted": signal.raw_payload.get("liquidity_adjusted") if isinstance(signal.raw_payload, dict) else None,
             "evaluation_status": evaluation.evaluation_status,
+            "signal_direction": evaluation.signal_direction,
+            "paper_side": evaluation.paper_side,
+            "entry_price": evaluation.entry_price,
+            "exit_price": evaluation.exit_price,
+            "market_yes_change": evaluation.market_yes_change,
+            "sportsbook_fair_change": evaluation.sportsbook_fair_change,
+            "absolute_edge_change": evaluation.absolute_edge_change,
+            "closure_reason": evaluation.closure_reason,
         },
     )
 
