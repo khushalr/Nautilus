@@ -230,6 +230,29 @@ class SignalPerformanceRow(BaseModel):
     liquidity_adjusted: bool | None = None
 
 
+class BacktestSweepResultOut(BaseModel):
+    id: str
+    run_id: str
+    min_abs_edge: float
+    min_confidence_score: float
+    min_match_confidence: float
+    simulate_negative_edge: bool
+    signals_created: int
+    evaluated_yes_side: int
+    evaluated_no_side: int
+    directional_accuracy: float | None = None
+    average_paper_pnl_per_contract: float | None = None
+    average_return_on_stake: float | None = None
+    edge_close_rate: float | None = None
+    market_driven_close_rate: float | None = None
+    fair_value_driven_close_rate: float | None = None
+    suspicious_invalid_count: int
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class UserModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     config: dict[str, Any] = Field(default_factory=dict)

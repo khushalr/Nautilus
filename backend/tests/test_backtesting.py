@@ -19,7 +19,7 @@ from app.services.backtesting import (
     persist_signal_results,
     reconstruct_historical_edge,
 )
-from app.jobs.backtest_signals import _verbose_skip_row
+from app.jobs.backtest_signals import _candidate_timestamps, _evaluate_sweep_combination, _verbose_skip_row
 
 
 def test_historical_timestamp_matching(db_session) -> None:
@@ -618,6 +618,22 @@ def test_performance_aggregate_counts_negative_edge_no_side_simulations() -> Non
     assert summary["average_paper_pnl_per_contract"] == pytest.approx(0.025)
     assert summary["yes_side_average_paper_pnl_per_contract"] == pytest.approx(0.01)
     assert summary["no_side_average_paper_pnl_per_contract"] == pytest.approx(0.04)
+
+
+def test_threshold_sweep_combination_reports_yes_and_no_side_evaluations(db_session) -> None:
+    market, timestamp = _entry_setup(db_session, entry_price=0.80)
+    db_session.add(_price(market.id, timestamp + timedelta(hours=1), raw_price=0.72, liquidity=75000))
+    db_session.commit()
+
+    result = _evaluate_sweep_combination(
+        db_session,
+        _candidate_timestamps(db_session, None, 10),
+        config={**_loose_config(), "simulate_negative_edge": True, "min_abs_edge": 0.001},
+    )
+
+    assert result["signals_created"] >= 1
+    assert result["evaluated_no_side"] >= 1
+    assert result["average_paper_pnl_per_contract"] is not None
 
 
 def test_quota_cost_estimation_and_yes_guard_inputs() -> None:

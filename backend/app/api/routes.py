@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import (
     AlertRule,
+    BacktestSweepResult,
     FairValueSnapshot,
     Market,
     PaperTradeSignal,
@@ -23,6 +24,7 @@ from app.schemas import (
     AlertRuleCreate,
     AlertRuleOut,
     AlertRuleUpdate,
+    BacktestSweepResultOut,
     FairValueSnapshotOut,
     MarketDetailOut,
     MarketOut,
@@ -406,6 +408,20 @@ def signal_performance_rows(
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> list[SignalPerformanceRow]:
     return [_signal_row(row) for row in _signal_result_rows(db, limit=limit)]
+
+
+@router.get("/signals/performance/sweeps", response_model=list[BacktestSweepResultOut])
+def signal_performance_sweeps(
+    db: Session = Depends(get_db),
+    latest_only: bool = Query(default=True),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[BacktestSweepResult]:
+    stmt = select(BacktestSweepResult).order_by(BacktestSweepResult.created_at.desc()).limit(limit)
+    rows = list(db.scalars(stmt))
+    if not latest_only or not rows:
+        return rows
+    latest_run_id = rows[0].run_id
+    return [row for row in rows if row.run_id == latest_run_id]
 
 
 @router.get("/signals/performance/{market_id}", response_model=list[SignalPerformanceRow])

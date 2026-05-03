@@ -203,6 +203,27 @@ export type SignalPerformanceRow = {
   liquidity_adjusted: boolean | null;
 };
 
+export type BacktestSweepResult = {
+  id: string;
+  run_id: string;
+  min_abs_edge: number;
+  min_confidence_score: number;
+  min_match_confidence: number;
+  simulate_negative_edge: boolean;
+  signals_created: number;
+  evaluated_yes_side: number;
+  evaluated_no_side: number;
+  directional_accuracy: number | null;
+  average_paper_pnl_per_contract: number | null;
+  average_return_on_stake: number | null;
+  edge_close_rate: number | null;
+  market_driven_close_rate: number | null;
+  fair_value_driven_close_rate: number | null;
+  suspicious_invalid_count: number;
+  raw_payload: Record<string, unknown>;
+  created_at: string;
+};
+
 export type MarketDetail = {
   market: Market;
   latest_fair_value: FairValueSnapshot | null;

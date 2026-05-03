@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
 from collections import defaultdict
 from datetime import datetime
+from itertools import product
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import delete, func, select
 
+from app.api.routes import _aggregate_rows
 from app.core.db import SessionLocal
 from app.models import (
+    BacktestSweepResult,
     HistoricalPredictionMarketPriceSnapshot,
     HistoricalSportsbookOddsSnapshot,
     Market,
@@ -26,6 +32,29 @@ from app.services.backtesting import (
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+SWEEP_MIN_ABS_EDGES = (0.001, 0.005, 0.01)
+SWEEP_MIN_CONFIDENCE_SCORES = (0.60, 0.65, 0.75)
+SWEEP_MIN_MATCH_CONFIDENCES = (0.85, 0.90)
+SWEEP_SIMULATE_NEGATIVE = (False, True)
+SWEEP_CSV_FIELDS = (
+    "run_id",
+    "min_abs_edge",
+    "min_confidence_score",
+    "min_match_confidence",
+    "simulate_negative_edge",
+    "signals_created",
+    "evaluated_yes_side",
+    "evaluated_no_side",
+    "directional_accuracy",
+    "average_paper_pnl_per_contract",
+    "average_return_on_stake",
+    "edge_close_rate",
+    "market_driven_close_rate",
+    "fair_value_driven_close_rate",
+    "suspicious_invalid_count",
+)
 
 
 def main() -> None:
@@ -51,6 +80,9 @@ def main() -> None:
     with SessionLocal() as db:
         if args.debug_market_id:
             _debug_market(db, args.debug_market_id, config)
+            return
+        if args.sweep_thresholds:
+            _run_threshold_sweep(db, args, config)
             return
         if args.clear_existing and not args.dry_run:
             db.execute(delete(SignalBacktestResult))
@@ -135,6 +167,183 @@ def main() -> None:
             logger.info("Verbose skip examples for %s:", reason)
             for example in examples:
                 logger.info("  %s", example)
+
+
+def _run_threshold_sweep(db, args, base_config: dict[str, Any]) -> None:
+    timestamps = _candidate_timestamps(db, args.market_id, args.limit)
+    run_id = str(uuid4())
+    rows: list[dict[str, Any]] = []
+    logger.info(
+        "Running threshold sweep over %s candidate timestamps and %s sportsbook snapshots.",
+        len(timestamps),
+        _sportsbook_snapshot_count(db),
+    )
+    for min_abs_edge, min_confidence, min_match_confidence, simulate_negative in product(
+        SWEEP_MIN_ABS_EDGES,
+        SWEEP_MIN_CONFIDENCE_SCORES,
+        SWEEP_MIN_MATCH_CONFIDENCES,
+        SWEEP_SIMULATE_NEGATIVE,
+    ):
+        config = {
+            **base_config,
+            "min_abs_edge": min_abs_edge,
+            "min_confidence_score": min_confidence,
+            "min_match_confidence": min_match_confidence,
+            "simulate_negative_edge": simulate_negative,
+        }
+        result = _evaluate_sweep_combination(db, timestamps, config=config)
+        row = {
+            "run_id": run_id,
+            "min_abs_edge": min_abs_edge,
+            "min_confidence_score": min_confidence,
+            "min_match_confidence": min_match_confidence,
+            "simulate_negative_edge": simulate_negative,
+            **result,
+        }
+        rows.append(row)
+        logger.info(
+            "Sweep edge=%s confidence=%s match=%s simulate_negative=%s: signals=%s yes_eval=%s no_eval=%s "
+            "direction=%s avg_pnl=%s avg_return=%s edge_close=%s market_close=%s fair_close=%s suspicious=%s",
+            min_abs_edge,
+            min_confidence,
+            min_match_confidence,
+            simulate_negative,
+            row["signals_created"],
+            row["evaluated_yes_side"],
+            row["evaluated_no_side"],
+            _format_metric(row["directional_accuracy"]),
+            _format_metric(row["average_paper_pnl_per_contract"]),
+            _format_metric(row["average_return_on_stake"]),
+            _format_metric(row["edge_close_rate"]),
+            _format_metric(row["market_driven_close_rate"]),
+            _format_metric(row["fair_value_driven_close_rate"]),
+            row["suspicious_invalid_count"],
+        )
+    if args.sweep_output:
+        _write_sweep_csv(Path(args.sweep_output), rows)
+        logger.info("Wrote threshold sweep CSV to %s", args.sweep_output)
+    if not args.dry_run:
+        _persist_sweep_rows(db, rows)
+        db.commit()
+        logger.info("Stored %s threshold sweep rows with run_id=%s", len(rows), run_id)
+    else:
+        logger.info("Dry run enabled; threshold sweep rows were not stored.")
+
+
+def _evaluate_sweep_combination(db, timestamps: list[tuple[str, datetime]], *, config: dict[str, Any]) -> dict[str, Any]:
+    performance_rows: list[dict[str, Any]] = []
+    signal_count = 0
+    suspicious_invalid_count = 0
+    for index, (market_id, timestamp) in enumerate(timestamps):
+        market = db.get(Market, market_id)
+        if market is None:
+            continue
+        edge = reconstruct_historical_edge(db, market, timestamp, config=config)
+        if edge.skip_reason:
+            if edge.skip_reason in {"suspicious_probability_orientation", "invalid_probability_range"}:
+                suspicious_invalid_count += 1
+            continue
+        direction = detect_signal(edge, config=config)
+        if direction is None:
+            if _threshold_skip(edge, config) in {"suspicious_probability_orientation", "invalid_probability_range"}:
+                suspicious_invalid_count += 1
+            continue
+        signal_count += 1
+        signal_id = f"sweep-{index}"
+        evaluations = evaluate_signal_horizons(db, edge, direction, config=config)
+        for evaluation in evaluations:
+            performance_rows.append(_sweep_performance_row(signal_id, edge, direction, evaluation))
+    summary = _aggregate_rows(performance_rows)
+    return {
+        "signals_created": signal_count,
+        "evaluated_yes_side": summary["evaluated_long_yes_signals"],
+        "evaluated_no_side": summary["evaluated_negative_edge_signals"],
+        "directional_accuracy": summary["directional_accuracy"],
+        "average_paper_pnl_per_contract": summary["average_paper_pnl_per_contract"],
+        "average_return_on_stake": summary["average_return_on_stake"],
+        "edge_close_rate": summary["edge_close_rate"],
+        "market_driven_close_rate": summary["market_driven_close_rate"],
+        "fair_value_driven_close_rate": summary["fair_value_driven_close_rate"],
+        "suspicious_invalid_count": suspicious_invalid_count + summary["suspicious_invalid_signals"],
+        "raw_payload": {
+            "total_rows": len(performance_rows),
+            "evaluated_signals": summary["evaluated_signals"],
+            "simulated_long_yes_signals": summary["simulated_long_yes_signals"],
+            "simulated_negative_edge_signals": summary["simulated_negative_edge_signals"],
+            "tracked_negative_edge_signals": summary["tracked_negative_edge_signals"],
+            "edge_widened_rate": summary["edge_widened_rate"],
+            "no_meaningful_change_rate": summary["no_meaningful_change_rate"],
+        },
+    }
+
+
+def _sweep_performance_row(signal_id: str, edge, direction: str, evaluation) -> dict[str, Any]:
+    paper_side = evaluation.paper_side
+    category = _sweep_signal_category(direction, evaluation)
+    return {
+        "signal_id": signal_id,
+        "paper_pnl_per_contract": evaluation.paper_pnl_per_contract,
+        "did_edge_close": evaluation.did_edge_close,
+        "moved_expected_direction": evaluation.moved_expected_direction,
+        "entry_net_edge": edge.net_edge,
+        "return_on_stake": evaluation.return_on_stake,
+        "liquidity_adjusted": edge.liquidity_adjusted,
+        "evaluation_status": evaluation.evaluation_status,
+        "skip_reason": evaluation.skip_reason,
+        "signal_category": category,
+        "paper_side": paper_side,
+        "closure_reason": evaluation.closure_reason,
+        "market_yes_change": evaluation.market_yes_change,
+        "sportsbook_fair_change": evaluation.sportsbook_fair_change,
+        "edge_change": evaluation.edge_change,
+        "absolute_edge_change": evaluation.absolute_edge_change,
+    }
+
+
+def _sweep_signal_category(direction: str, evaluation) -> str:
+    if evaluation.evaluation_status in {"suspicious_probability_orientation", "invalid_probability"}:
+        return "suspicious_or_invalid"
+    if direction == "possible_yes_overpricing":
+        if evaluation.paper_side == "NO":
+            return "negative_edge_no_side_simulated" if evaluation.paper_pnl_per_contract is not None else "unevaluated_negative_edge_no_side"
+        return "negative_edge_overpricing_tracked_only"
+    return "positive_edge_long_yes_simulated" if evaluation.paper_pnl_per_contract is not None else "unevaluated_missing_future_price"
+
+
+def _persist_sweep_rows(db, rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        db.add(
+            BacktestSweepResult(
+                run_id=row["run_id"],
+                min_abs_edge=row["min_abs_edge"],
+                min_confidence_score=row["min_confidence_score"],
+                min_match_confidence=row["min_match_confidence"],
+                simulate_negative_edge=row["simulate_negative_edge"],
+                signals_created=row["signals_created"],
+                evaluated_yes_side=row["evaluated_yes_side"],
+                evaluated_no_side=row["evaluated_no_side"],
+                directional_accuracy=row["directional_accuracy"],
+                average_paper_pnl_per_contract=row["average_paper_pnl_per_contract"],
+                average_return_on_stake=row["average_return_on_stake"],
+                edge_close_rate=row["edge_close_rate"],
+                market_driven_close_rate=row["market_driven_close_rate"],
+                fair_value_driven_close_rate=row["fair_value_driven_close_rate"],
+                suspicious_invalid_count=row["suspicious_invalid_count"],
+                raw_payload=row.get("raw_payload", {}),
+            )
+        )
+
+
+def _write_sweep_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SWEEP_CSV_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field) for field in SWEEP_CSV_FIELDS})
+
+
+def _format_metric(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.4f}"
 
 
 def _candidate_timestamps(db, market_id: str | None, limit: int) -> list[tuple[str, datetime]]:
@@ -295,6 +504,8 @@ def _parse_args():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--debug-market-id", help="Print historical token orientation and edge reconstruction for one market, then exit.")
     parser.add_argument("--clear-existing", action="store_true")
+    parser.add_argument("--sweep-thresholds", action="store_true", help="Evaluate a fixed grid of research thresholds without replacing signal rows.")
+    parser.add_argument("--sweep-output", help="Optional CSV path for threshold sweep results.")
     return parser.parse_args()
 
 

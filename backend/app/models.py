@@ -269,6 +269,33 @@ class SignalBacktestResult(Base):
     market: Mapped[Market] = relationship()
 
 
+class BacktestSweepResult(Base):
+    __tablename__ = "backtest_sweep_results"
+    __table_args__ = (
+        Index("ix_backtest_sweep_results_run_created", "run_id", "created_at"),
+        Index("ix_backtest_sweep_results_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    min_abs_edge: Mapped[float] = mapped_column(Float, nullable=False)
+    min_confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
+    min_match_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    simulate_negative_edge: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    signals_created: Mapped[int] = mapped_column(Integer, nullable=False)
+    evaluated_yes_side: Mapped[int] = mapped_column(Integer, nullable=False)
+    evaluated_no_side: Mapped[int] = mapped_column(Integer, nullable=False)
+    directional_accuracy: Mapped[float | None] = mapped_column(Float)
+    average_paper_pnl_per_contract: Mapped[float | None] = mapped_column(Float)
+    average_return_on_stake: Mapped[float | None] = mapped_column(Float)
+    edge_close_rate: Mapped[float | None] = mapped_column(Float)
+    market_driven_close_rate: Mapped[float | None] = mapped_column(Float)
+    fair_value_driven_close_rate: Mapped[float | None] = mapped_column(Float)
+    suspicious_invalid_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    raw_payload: Mapped[dict] = mapped_column(JSON_DICT, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class UserModel(TimestampMixin, Base):
     __tablename__ = "user_models"
 
