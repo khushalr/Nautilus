@@ -47,7 +47,7 @@ def main():
     if a.events < 200:
         p.error("At least 200 events required")
     rows = list(operations(a.events))
-    source = Path(__file__).resolve().parents[3] / "benchmarks/book.cpp"
+    source = Path(__file__).resolve().parents[2] / "benchmarks/book.cpp"
     with tempfile.TemporaryDirectory() as directory:
         binary = Path(directory)/"book"
         subprocess.run(["g++", "-O3", "-std=c++17", str(source), "-o", str(binary)], check=True)
