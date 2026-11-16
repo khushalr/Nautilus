@@ -1,0 +1,24 @@
+name: Research tests
+on:
+  pull_request:
+  push:
+    branches: [research/btc-replay-integrity]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt -r backend/requirements-microstructure.txt
+      - run: python -m pytest backend/tests -q
+      - name: Synthetic fixture processing benchmark (not market performance)
+        working-directory: backend
+        run: python -m app.microstructure.replay tests/fixtures/btc_coinbase_synthetic.jsonl --venue coinbase > replay-result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-replay-result
+          path: backend/replay-result.json

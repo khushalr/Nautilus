@@ -1,5 +1,11 @@
 # Nautilus
 
+## BTC market microstructure research
+
+The new primary research direction is read-only BTC spot market data. The first incremental slice adds venue-specific L2 reconstruction, raw public-feed capture, deterministic replay and CPU latency instrumentation. See [BTC research setup, audit, architecture and limitations](docs/BTC_RESEARCH.md). Live-feed verification and predictive models are pending; no profitability or eligible prediction-contract claims are made.
+
+The existing scanner below is preserved as a separate legacy research capability.
+
 Nautilus is a prediction-market fair-value scanner. It compares prediction-market prices from Polymarket and Kalshi with sportsbook odds, removes sportsbook vig, estimates fair probability, calculates edge, and shows opportunities in a clean research dashboard.
 
 Nautilus is market data and analytics software. It is not financial advice, not betting advice, and not a trading or execution platform.
