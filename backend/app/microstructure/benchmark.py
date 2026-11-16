@@ -13,7 +13,7 @@ def operations(count):
     for i in range(count):
         side = i % 2
         level = (i // 2) % 100
-        price = 100000 - level if side == 0 else 100100 + level
+        price = 100000 + level if side == 0 else 100100 + level
         # A nonempty best level is always retained.
         quantity = 0 if i % 7 == 0 and level != 0 else i % 97 + 1
         yield side, price, quantity
@@ -35,7 +35,8 @@ def python_book(rows):
             book[price] = quantity
         else:
             book.pop(price, None)
-        checksum += max(bids) + min(asks)
+        bid, ask = max(bids), min(asks)
+        checksum += bid + ask + bids[bid] + asks[ask]
         latency.append(time.perf_counter_ns() - start)
     return {"checksum": checksum, "events": len(rows), **percentiles(latency)}
 

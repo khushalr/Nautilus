@@ -75,5 +75,5 @@ def test_replay_determinism_and_sessions():
 def test_normalized_benchmark_hand_calculated():
     from app.microstructure.benchmark import python_book
     result = python_book([(0, 100001, 2), (0, 100001, 0)])
-    assert result["checksum"] == 400201
+    assert result["checksum"] == 400206
     assert result["events"] == 2

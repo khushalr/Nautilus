@@ -17,6 +17,8 @@ def replay(lines, venue):
     last_session = None
     for line in lines:
         envelope = json.loads(line)
+        if envelope.get("venue", venue) != venue:
+            raise ValueError("Mixed venue capture")
         received = envelope["received_ns"]
         if not isinstance(received, int) or received < last_received:
             raise ValueError("Replay must be in recorded arrival order")

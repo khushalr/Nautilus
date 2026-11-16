@@ -54,6 +54,8 @@ class Book:
         A disconnect, malformed update, or stale stream requires a new snapshot.
         """
         try:
+            if not isinstance(message, dict):
+                raise InvalidBook("Expected message object")
             return self._apply(message, received_ns)
         except (ValueError, KeyError, TypeError, ArithmeticError) as exc:
             self.reset()

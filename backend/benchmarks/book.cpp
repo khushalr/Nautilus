@@ -20,7 +20,8 @@ int main() {
         auto& book=s==0?bids:asks;
         if(q) book[p]=q; else book.erase(p);
         if(bids.empty() || asks.empty()) return 2;
-        checksum += bids.rbegin()->first + asks.begin()->first;
+        checksum += bids.rbegin()->first + asks.begin()->first
+                    + bids.rbegin()->second + asks.begin()->second;
         latency.push_back(std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()-start).count());
     }
