@@ -10,7 +10,7 @@ logic remains separate and is not evidence of an Ontario-accessible instrument.
 |---|---|---|---|
 | 1 | Decimal L2, strict validation, raw recorder, replay | High | Implemented here; live verification pending |
 | 2 | Longer real captures, independent CRC fixtures, fault injection | High | Feed access and running tests |
-| 3 | Python vs Rust/C++ parity benchmark | High | Stable corpus; not implemented |
+| 3 | Python vs Rust/C++ parity benchmark | High | Normalized synthetic component added; full venue pipeline remains pending |
 | 4 | Purged walk-forward calibrated baselines, 5/15/60-minute labels | High | Sufficient real history; not implemented |
 | 5 | Cost-aware event simulator and dashboard | High | Valid signals and execution assumptions |
 | 6 | Exact prediction-contract verification and fair value | Conditional | Brokerage evidence and settlement metadata |
@@ -70,7 +70,7 @@ until an actual runner result is inspected. No local runtime was available durin
 authoring; PR CI is the executable verification path.
 
 No normalized trade-flow/realized-volatility feature pipeline, model training,
-calibration, statistical signal-decay study, C++/Rust comparison, event-driven BTC
+calibration, statistical signal-decay study, full venue C++/Rust pipeline comparison, event-driven BTC
 paper simulator or BTC dashboard is implemented yet. No predictive or profitable
 performance is claimed. Existing prediction-market simulations are not BTC results.
 
@@ -88,3 +88,19 @@ order endpoint, private credentials, wallet, or live-execution interface.
 - Implemented Decimal-based BTC L2 reconstruction with Kraken CRC validation and fail-closed book handling.
 - Added raw WebSocket capture and deterministic replay with feature-output hashes and staged CPU latency instrumentation.
 - Added regression coverage for malformed, crossed, stale and pre-snapshot books while preserving the existing research application.
+
+## Normalized C++ comparison
+
+Run `cd backend && python -m app.microstructure.benchmark` with g++ installed.
+The runner compiles C++17 at -O3 and compares 20,000 identical deterministic
+integer price-level updates, deletion semantics and best-quote checksums.
+Both report per-event p50/p95/p99; setup, input parsing and subprocess startup
+are excluded. Python uses dictionary scans; C++ uses an ordered map, so this
+measures combined language/data-structure differences, not pure language speed.
+It is a deliberately limited common component, not a C++ Kraken adapter or a
+complete pipeline comparison. Shared CI runners are noisy; rerun on a pinned
+machine with warmups and larger real corpora before making speed claims.
+
+CI also attempts bounded 15-second public-feed captures, explicitly non-blocking
+because source availability is external. Inspect each feed step and replay output;
+a green overall workflow alone does not prove feed access succeeded.

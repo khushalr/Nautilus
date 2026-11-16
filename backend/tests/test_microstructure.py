@@ -71,3 +71,9 @@ def test_replay_determinism_and_sessions():
     assert a["book_events"] == 1
     with pytest.raises(ValueError):
         replay([line, json.dumps({"received_ns": 9, "raw": "{}"})], "coinbase")
+
+def test_normalized_benchmark_hand_calculated():
+    from app.microstructure.benchmark import python_book
+    result = python_book([(0, 100001, 2), (0, 100001, 0)])
+    assert result["checksum"] == 400201
+    assert result["events"] == 2
