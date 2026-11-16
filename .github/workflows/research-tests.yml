@@ -44,3 +44,5 @@ jobs:
             backend/replay-result.json
             backend/component-benchmark.json
             backend/*-replay.json
+            backend/kraken.jsonl
+            backend/coinbase.jsonl
