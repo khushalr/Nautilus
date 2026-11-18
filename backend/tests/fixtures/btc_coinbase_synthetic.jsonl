@@ -1,0 +1,2 @@
+{"received_ns":1000000000,"raw":"{\"type\":\"snapshot\",\"product_id\":\"BTC-USD\",\"bids\":[[\"100\",\"2\"]],\"asks\":[[\"102\",\"1\"]]}"}
+{"received_ns":1001000000,"raw":"{\"type\":\"l2update\",\"product_id\":\"BTC-USD\",\"changes\":[[\"buy\",\"100\",\"3\"]]}"}

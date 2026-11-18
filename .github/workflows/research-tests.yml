@@ -1,0 +1,48 @@
+name: Research tests
+on:
+  pull_request:
+  push:
+    branches: [research/btc-replay-integrity]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt -r backend/requirements-microstructure.txt
+      - run: python -m pytest backend/tests -q
+      - name: Synthetic fixture processing benchmark (not market performance)
+        working-directory: backend
+        run: python -m app.microstructure.replay tests/fixtures/btc_coinbase_synthetic.jsonl --venue coinbase > replay-result.json
+      - name: Compare normalized Python and C++ book component
+        working-directory: backend
+        run: python -m app.microstructure.benchmark > component-benchmark.json
+      - name: Bounded public feed smoke test
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          python -m app.microstructure.capture --venue kraken --output kraken.jsonl --seconds 15
+          python -m app.microstructure.replay kraken.jsonl --venue kraken > kraken-replay.json
+          python -m app.microstructure.capture --venue coinbase --output coinbase.jsonl --seconds 15
+          python -m app.microstructure.replay coinbase.jsonl --venue coinbase > coinbase-replay.json
+      - name: Print measured processing results
+        if: always()
+        working-directory: backend
+        run: |
+          cat replay-result.json component-benchmark.json
+          for path in kraken-replay.json coinbase-replay.json; do
+            if [ -f "$path" ]; then cat "$path"; fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-replay-result
+          path: |
+            backend/replay-result.json
+            backend/component-benchmark.json
+            backend/*-replay.json
+            backend/kraken.jsonl
+            backend/coinbase.jsonl
